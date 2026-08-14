@@ -588,13 +588,18 @@
           <div class="p-6 border-b flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
               <h3 class="font-bold text-slate-800 text-lg">Rekapitulasi Absensi & Agenda (Realtime)</h3>
-              <p class="text-xs text-slate-500">Filter lengkap berdasarkan waktu, nama, kelas, peran, dan jenis sesi</p>
+              <p class="text-xs text-slate-500">Filter lengkap berdasarkan waktu, nama, kelas, peran, mapel, dan jenis sesi</p>
             </div>
             <div class="flex flex-wrap items-center gap-3">
               <input type="date" id="rekap-date-filter" onchange="renderRekapTable()" class="px-3 py-2 bg-slate-50 border rounded-xl text-xs font-semibold">
               <input type="text" id="rekap-name-search" placeholder="Cari nama..." oninput="renderRekapTable()" class="px-3 py-2 bg-slate-50 border rounded-xl text-xs">
               <select id="rekap-class-filter" onchange="renderRekapTable()" class="px-3 py-2 bg-slate-50 border rounded-xl text-xs font-semibold"></select>
               
+              <!-- Filter Mapel (Mata Pelajaran) -->
+              <select id="rekap-mapel-filter" onchange="renderRekapTable()" class="px-3 py-2 bg-slate-50 border rounded-xl text-xs font-semibold">
+                <option value="ALL">Semua Mapel</option>
+              </select>
+
               <!-- Filter Peran (Hanya Muncul untuk Admin) -->
               <select id="rekap-role-filter" onchange="renderRekapTable()" class="admin-only-filter px-3 py-2 bg-slate-50 border rounded-xl text-xs font-semibold">
                 <option value="ALL">Semua Peran (Guru & Siswa)</option>
@@ -772,6 +777,7 @@
     let selectedCameraId = null, selectedAgendaCameraId = null;
     let currentActiveView = 'dashboard';
     let pieChartInstance = null;
+    let editingSiswaNisn = null, editingGuruNip = null;
 
     const adminNavItems = [
       { id:'dashboard', label:'Dashboard', icon:'fa-gauge-high' },
@@ -928,6 +934,38 @@
 
       const badgeKelas = document.getElementById('badge-total-kelas');
       if (badgeKelas) badgeKelas.innerText = `${classList.length} Kelas`;
+
+      updateMapelDropdowns();
+    }
+
+    /* Update Opsi Dropdown Filter Mapel secara Otomatis */
+    function updateMapelDropdowns() {
+      const mapelSet = new Set();
+      
+      teachers.forEach(t => {
+        const rawMapel = String(t.jabatan || t.mapel || '');
+        rawMapel.split(/[,;]+/).forEach(m => {
+          const clean = m.trim();
+          if (clean && clean !== 'Pengajar') mapelSet.add(clean);
+        });
+      });
+
+      attendanceLogs.forEach(l => {
+        const j = String(l.jenisAbsen || '').trim();
+        if (j && !['Masuk Sekolah', 'Shalat Duha', 'Shalat Dzuhur', 'Pulang'].includes(j)) {
+          mapelSet.add(j);
+        }
+      });
+
+      const mapelOptions = `<option value="ALL">Semua Mapel</option>` + 
+        Array.from(mapelSet).sort().map(m => `<option value="${m}">${m}</option>`).join('');
+
+      const rekapMapel = document.getElementById('rekap-mapel-filter');
+      if (rekapMapel) {
+        const curVal = rekapMapel.value || 'ALL';
+        rekapMapel.innerHTML = mapelOptions;
+        rekapMapel.value = curVal;
+      }
     }
 
     function refreshCurrentViewData() {
@@ -1591,6 +1629,7 @@
       const dateFilter = document.getElementById('rekap-date-filter')?.value || getTodayLocalDateStr();
       const nameSearch = document.getElementById('rekap-name-search')?.value.toLowerCase().trim() || "";
       const classFilter = document.getElementById('rekap-class-filter')?.value || "ALL";
+      const mapelFilter = document.getElementById('rekap-mapel-filter')?.value || "ALL";
       
       const roleFilter = currentUserRole === 'admin' ? (document.getElementById('rekap-role-filter')?.value || "ALL") : "ALL";
       const sessionFilter = currentUserRole === 'admin' ? (document.getElementById('rekap-session-filter')?.value || "ALL") : "ALL";
@@ -1605,6 +1644,12 @@
         if (roleFilter !== 'ALL') {
           const itemPeran = l.peran || 'Siswa';
           mRole = itemPeran.toLowerCase() === roleFilter.toLowerCase();
+        }
+
+        let mMapel = true;
+        if (mapelFilter !== 'ALL') {
+          const logJenis = String(l.jenisAbsen || '').toLowerCase();
+          mMapel = logJenis.includes(mapelFilter.toLowerCase());
         }
 
         let mSession = true;
@@ -1631,7 +1676,7 @@
           }
         }
 
-        return mDate && mName && mClass && mRole && mSession && mTeacherClass;
+        return mDate && mName && mClass && mRole && mSession && mTeacherClass && mMapel;
       });
     }
 
@@ -1676,15 +1721,15 @@
     function shareRekapToWhatsApp() {
       const dateFilter = document.getElementById('rekap-date-filter')?.value || getTodayLocalDateStr();
       const classFilter = document.getElementById('rekap-class-filter')?.value || "ALL";
+      const mapelFilter = document.getElementById('rekap-mapel-filter')?.value || "ALL";
       const filtered = getFilteredRekapData();
       const jamInfo = document.getElementById('agenda-jampel')?.value || '-';
-      const mapelInfo = currentUserRole === 'guru' ? (document.getElementById('agenda-mapel')?.value || currentLoggedTeacher?.jabatan || '-') : 'Umum';
 
       let textMsg = `*REKAP ABSENSI & AGENDA KELAS*\n`;
       textMsg += `Sekolah: ${schoolProfile.namaSekolah}\n`;
       textMsg += `Tanggal: ${dateFilter}\n`;
       textMsg += `Jam Pelajaran: ${jamInfo}\n`;
-      textMsg += `Mapel: ${mapelInfo}\n`;
+      textMsg += `Filter Mapel: ${mapelFilter}\n`;
       textMsg += `Kelas: ${classFilter}\n`;
       textMsg += `-----------------------------------\n\n`;
 
@@ -1769,47 +1814,46 @@
           const logDate = String(log.date || log.timestamp || '').split(' ')[0];
           const logJenis = String(log.jenisAbsen || '').trim().toLowerCase();
 
-          return logNisnNorm === normCandNisn && logDate.includes(dateFilter) && logJenis.includes(targetSession.toLowerCase());
+          return logNisnNorm === normCandNisn && logDate === dateFilter && logJenis === targetSession.toLowerCase();
         });
 
         return mName && mClass && !alreadyAttended;
       });
 
       if (filteredBelum.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-slate-400 font-semibold">Semua pengguna pada kriteria ini sudah melakukan absensi! 🎉</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-slate-400 font-semibold">Semua siswa/guru sudah melakukan absensi atau tidak ada data.</td></tr>`;
         return;
       }
 
-      tbody.innerHTML = filteredBelum.map(cand => `
+      tbody.innerHTML = filteredBelum.map(item => `
         <tr class="hover:bg-slate-50 border-b">
-          <td class="px-6 py-3.5 font-mono font-bold">${cand.nisn}</td>
-          <td class="px-6 py-3.5 font-bold text-slate-800">${cand.nama}</td>
-          <td class="px-6 py-3.5"><span class="px-2 py-0.5 ${cand.peran === 'Guru' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'} rounded text-xs font-semibold">${cand.peran}</span></td>
-          <td class="px-6 py-3.5">${cand.kelas}</td>
+          <td class="px-6 py-3.5 font-mono font-bold">${item.nisn}</td>
+          <td class="px-6 py-3.5 font-bold text-slate-800">${item.nama}</td>
+          <td class="px-6 py-3.5"><span class="px-2 py-0.5 ${item.peran === 'Guru' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'} rounded text-xs font-semibold">${item.peran}</span></td>
+          <td class="px-6 py-3.5">${item.kelas}</td>
           <td class="px-6 py-3.5 text-center">
-            <div class="flex items-center justify-center gap-1.5">
-              <button onclick="submitManualAbsenBelum('${cand.nisn}', '${cand.nama}', '${cand.kelas}', 'Hadir', '${cand.peran}')" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-xs">Hadir</button>
-              <button onclick="submitManualAbsenBelum('${cand.nisn}', '${cand.nama}', '${cand.kelas}', 'Izin', '${cand.peran}')" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-lg shadow-xs">Izin</button>
-              <button onclick="submitManualAbsenBelum('${cand.nisn}', '${cand.nama}', '${cand.kelas}', 'Sakit', '${cand.peran}')" class="px-2.5 py-1 bg-blue-500 hover:bg-blue-600 text-white font-bold text-xs rounded-lg shadow-xs">Sakit</button>
-              <button onclick="submitManualAbsenBelum('${cand.nisn}', '${cand.nama}', '${cand.kelas}', 'Alfa', '${cand.peran}')" class="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg shadow-xs">Alfa</button>
+            <div class="flex items-center justify-center space-x-1.5">
+              <button onclick="manualRecordBelum('${item.nisn}', '${item.nama}', '${item.kelas}', 'Hadir', '${item.peran}')" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition">Hadir</button>
+              <button onclick="manualRecordBelum('${item.nisn}', '${item.nama}', '${item.kelas}', 'Izin', '${item.peran}')" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold transition">Izin</button>
+              <button onclick="manualRecordBelum('${item.nisn}', '${item.nama}', '${item.kelas}', 'Sakit', '${item.peran}')" class="px-2.5 py-1 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg text-xs font-bold transition">Sakit</button>
+              <button onclick="manualRecordBelum('${item.nisn}', '${item.nama}', '${item.kelas}', 'Alfa', '${item.peran}')" class="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition">Alfa</button>
             </div>
           </td>
         </tr>
       `).join('');
     }
 
-    function submitManualAbsenBelum(nisn, nama, kelas, status, peran) {
+    function manualRecordBelum(nisn, nama, kelas, status, peran) {
       let jenis = "Masuk Sekolah";
       if (currentUserRole === 'guru') {
         jenis = document.getElementById('agenda-mapel')?.value || currentLoggedTeacher?.jabatan || "Pelajaran";
       } else {
         jenis = document.getElementById('belum-session-filter')?.value || "Masuk Sekolah";
       }
-
       recordAttendanceDirect(nisn, nama, kelas, status, jenis, peran);
     }
 
-    /* ============ KELOLA SISWA ============ */
+    /* ============ CRUD DATA SISWA ============ */
     function renderSiswaTable() {
       const tbody = document.getElementById('siswa-table-body');
       if (!tbody) return;
@@ -1818,27 +1862,27 @@
       const filterClass = document.getElementById('siswa-class-filter')?.value || 'ALL';
 
       const filtered = students.filter(s => {
-        const mSearch = !search || s.nama.toLowerCase().includes(search) || String(s.nisn).includes(search);
-        const mClass = filterClass === 'ALL' || s.kelas === filterClass;
+        const mSearch = !search || String(s.nama).toLowerCase().includes(search) || String(s.nisn).includes(search);
+        const mClass = filterClass === 'ALL' || String(s.kelas) === filterClass;
         return mSearch && mClass;
       });
 
       if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" class="p-6 text-center text-slate-400 font-semibold">Tidak ada data siswa.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="p-6 text-center text-slate-400 font-semibold">Tidak ada data siswa ditemukan.</td></tr>`;
         return;
       }
 
-      tbody.innerHTML = filtered.map((s, idx) => `
+      tbody.innerHTML = filtered.map(s => `
         <tr class="hover:bg-slate-50 border-b">
-          <td class="px-6 py-3.5"><img src="${s.fotoUrl || DEFAULT_AVATAR_SVG}" class="w-8 h-8 rounded-full object-cover bg-slate-100" onerror="this.src='${DEFAULT_AVATAR_SVG}'"></td>
-          <td class="px-6 py-3.5 font-mono font-bold">${s.nisn}</td>
-          <td class="px-6 py-3.5 font-bold text-slate-800">${s.nama}</td>
-          <td class="px-6 py-3.5">${s.kelas}</td>
-          <td class="px-6 py-3.5">${s.jk || 'L'}</td>
-          <td class="px-6 py-3.5">${s.nohp || '-'}</td>
-          <td class="px-6 py-3.5 text-right">
-            <button onclick="editSiswa('${s.nisn}')" class="px-2.5 py-1 bg-amber-50 text-amber-700 hover:bg-amber-100 font-bold text-xs rounded-lg mr-1"><i class="fa-solid fa-pen"></i></button>
-            <button onclick="deleteSiswaAction('${s.nisn}')" class="px-2.5 py-1 bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold text-xs rounded-lg"><i class="fa-solid fa-trash"></i></button>
+          <td class="px-6 py-3"><img src="${s.fotoUrl || DEFAULT_AVATAR_SVG}" class="w-8 h-8 rounded-full object-cover border" onerror="this.src='${DEFAULT_AVATAR_SVG}'"></td>
+          <td class="px-6 py-3 font-mono font-bold">${s.nisn}</td>
+          <td class="px-6 py-3 font-bold text-slate-800">${s.nama}</td>
+          <td class="px-6 py-3">${s.kelas}</td>
+          <td class="px-6 py-3">${s.jk || 'L'}</td>
+          <td class="px-6 py-3">${s.nohp || '-'}</td>
+          <td class="px-6 py-3 text-right space-x-2">
+            <button onclick="editSiswa('${s.nisn}')" class="text-indigo-600 hover:text-indigo-800 text-xs font-bold"><i class="fa-solid fa-pen"></i> Edit</button>
+            <button onclick="deleteSiswa('${s.nisn}')" class="text-rose-600 hover:text-rose-800 text-xs font-bold"><i class="fa-solid fa-trash"></i> Hapus</button>
           </td>
         </tr>
       `).join('');
@@ -1847,7 +1891,8 @@
     function filterSiswaTable() { renderSiswaTable(); }
 
     function openAddSiswaModal() {
-      document.getElementById('modal-siswa-title').innerText = "Tambah Siswa Baru";
+      editingSiswaNisn = null;
+      document.getElementById('modal-siswa-title').innerText = 'Tambah Siswa';
       document.getElementById('form-nisn').value = '';
       document.getElementById('form-nisn').readOnly = false;
       document.getElementById('form-nama').value = '';
@@ -1860,7 +1905,8 @@
     function editSiswa(nisn) {
       const s = students.find(item => String(item.nisn) === String(nisn));
       if (!s) return;
-      document.getElementById('modal-siswa-title').innerText = "Edit Data Siswa";
+      editingSiswaNisn = s.nisn;
+      document.getElementById('modal-siswa-title').innerText = 'Edit Data Siswa';
       document.getElementById('form-nisn').value = s.nisn;
       document.getElementById('form-nisn').readOnly = true;
       document.getElementById('form-nama').value = s.nama;
@@ -1872,27 +1918,36 @@
 
     function saveSiswaForm(e) {
       e.preventDefault();
-      const data = {
-        nisn: document.getElementById('form-nisn').value.trim(),
-        nama: document.getElementById('form-nama').value.trim(),
-        kelas: document.getElementById('form-kelas').value,
-        jk: document.getElementById('form-jk').value,
-        nohp: document.getElementById('form-nohp').value.trim(),
-        fotoUrl: ''
-      };
-      callGasBackend('saveSiswa', data);
+      const nisn = document.getElementById('form-nisn').value.trim();
+      const nama = document.getElementById('form-nama').value.trim();
+      const kelas = document.getElementById('form-kelas').value;
+      const jk = document.getElementById('form-jk').value;
+      const nohp = document.getElementById('form-nohp').value.trim();
+
+      const siswaData = { nisn, nama, kelas, jk, nohp, fotoUrl: '' };
+
+      if (editingSiswaNisn) {
+        const idx = students.findIndex(s => String(s.nisn) === String(editingSiswaNisn));
+        if (idx !== -1) students[idx] = { ...students[idx], ...siswaData };
+      } else {
+        students.push(siswaData);
+      }
+
+      callGasBackend('saveSiswa', siswaData);
       closeSiswaModal();
+      renderSiswaTable();
       showToast("Data siswa berhasil disimpan!");
     }
 
-    function deleteSiswaAction(nisn) {
-      if (confirm(`Yakin ingin menghapus siswa dengan NISN ${nisn}?`)) {
-        callGasBackend('deleteSiswa', nisn);
-        showToast("Siswa terhapus");
-      }
+    function deleteSiswa(nisn) {
+      if (!confirm(`Yakin ingin menghapus siswa NISN ${nisn}?`)) return;
+      students = students.filter(s => String(s.nisn) !== String(nisn));
+      callGasBackend('deleteSiswa', { nisn: nisn });
+      renderSiswaTable();
+      showToast("Data siswa berhasil dihapus!");
     }
 
-    /* ============ KELOLA GURU ============ */
+    /* ============ CRUD DATA GURU ============ */
     function renderGuruTable() {
       const tbody = document.getElementById('guru-table-body');
       if (!tbody) return;
@@ -1900,30 +1955,30 @@
       const search = document.getElementById('guru-search')?.value.toLowerCase().trim() || '';
 
       const filtered = teachers.filter(g => {
-        return !search || g.nama.toLowerCase().includes(search) || String(g.nip).includes(search);
+        return !search || String(g.nama).toLowerCase().includes(search) || String(g.nip).includes(search);
       });
 
       if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-slate-400 font-semibold">Tidak ada data guru.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-slate-400 font-semibold">Tidak ada data guru ditemukan.</td></tr>`;
         return;
       }
 
       tbody.innerHTML = filtered.map(g => `
         <tr class="hover:bg-slate-50 border-b">
-          <td class="px-6 py-3.5"><img src="${g.fotoUrl || DEFAULT_AVATAR_SVG}" class="w-8 h-8 rounded-full object-cover bg-slate-100" onerror="this.src='${DEFAULT_AVATAR_SVG}'"></td>
-          <td class="px-6 py-3.5">
-            <div class="font-mono font-bold text-slate-800">${g.nip}</div>
-            <div class="text-[11px] text-slate-400">User: ${g.username || g.nip} | Pass: ${g.password || '123456'}</div>
+          <td class="px-6 py-3"><img src="${g.fotoUrl || DEFAULT_AVATAR_SVG}" class="w-8 h-8 rounded-full object-cover border" onerror="this.src='${DEFAULT_AVATAR_SVG}'"></td>
+          <td class="px-6 py-3">
+            <div class="font-mono font-bold">${g.nip}</div>
+            <div class="text-[11px] text-slate-400">User: ${g.username} | Pass: ${g.password}</div>
           </td>
-          <td class="px-6 py-3.5 font-bold text-slate-800">${g.nama}</td>
-          <td class="px-6 py-3.5">
-            <span class="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded text-xs font-bold block w-fit mb-1">${g.jabatan || 'Pengajar'}</span>
-            <span class="text-xs text-slate-500">Kelas: ${g.kelas || 'Semua'}</span>
+          <td class="px-6 py-3 font-bold text-slate-800">${g.nama}</td>
+          <td class="px-6 py-3">
+            <span class="px-2 py-0.5 bg-amber-50 text-amber-700 rounded text-xs font-bold">${g.jabatan || 'Pengajar'}</span>
+            <div class="text-xs text-slate-500 mt-0.5">Kelas: ${g.kelas || 'Semua'}</div>
           </td>
-          <td class="px-6 py-3.5">${g.nohp || '-'}</td>
-          <td class="px-6 py-3.5 text-right">
-            <button onclick="editGuru('${g.nip}')" class="px-2.5 py-1 bg-amber-50 text-amber-700 hover:bg-amber-100 font-bold text-xs rounded-lg mr-1"><i class="fa-solid fa-pen"></i></button>
-            <button onclick="deleteGuruAction('${g.nip}')" class="px-2.5 py-1 bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold text-xs rounded-lg"><i class="fa-solid fa-trash"></i></button>
+          <td class="px-6 py-3">${g.nohp || '-'}</td>
+          <td class="px-6 py-3 text-right space-x-2">
+            <button onclick="editGuru('${g.nip}')" class="text-indigo-600 hover:text-indigo-800 text-xs font-bold"><i class="fa-solid fa-pen"></i> Edit</button>
+            <button onclick="deleteGuru('${g.nip}')" class="text-rose-600 hover:text-rose-800 text-xs font-bold"><i class="fa-solid fa-trash"></i> Hapus</button>
           </td>
         </tr>
       `).join('');
@@ -1932,7 +1987,8 @@
     function filterGuruTable() { renderGuruTable(); }
 
     function openAddGuruModal() {
-      document.getElementById('modal-guru-title').innerText = "Tambah Guru Baru";
+      editingGuruNip = null;
+      document.getElementById('modal-guru-title').innerText = 'Tambah Guru & Penugasan';
       document.getElementById('form-guru-nip').value = '';
       document.getElementById('form-guru-nip').readOnly = false;
       document.getElementById('form-guru-nama').value = '';
@@ -1948,7 +2004,8 @@
     function editGuru(nip) {
       const g = teachers.find(item => String(item.nip) === String(nip));
       if (!g) return;
-      document.getElementById('modal-guru-title').innerText = "Edit Data Guru";
+      editingGuruNip = g.nip;
+      document.getElementById('modal-guru-title').innerText = 'Edit Data Guru & Penugasan';
       document.getElementById('form-guru-nip').value = g.nip;
       document.getElementById('form-guru-nip').readOnly = true;
       document.getElementById('form-guru-nama').value = g.nama;
@@ -1963,36 +2020,47 @@
 
     function saveGuruForm(e) {
       e.preventDefault();
-      const data = {
-        nip: document.getElementById('form-guru-nip').value.trim(),
-        nama: document.getElementById('form-guru-nama').value.trim(),
-        username: document.getElementById('form-guru-user').value.trim(),
-        password: document.getElementById('form-guru-pass').value.trim(),
-        jabatan: document.getElementById('form-guru-mapel').value.trim(),
-        jk: document.getElementById('form-guru-jk').value,
-        kelas: document.getElementById('form-guru-kelas').value,
-        nohp: document.getElementById('form-guru-nohp').value.trim(),
-        fotoUrl: ''
-      };
-      callGasBackend('saveGuru', data);
-      closeGuruModal();
-      showToast("Data Guru berhasil disimpan!");
-    }
+      const nip = document.getElementById('form-guru-nip').value.trim();
+      const nama = document.getElementById('form-guru-nama').value.trim();
+      const username = document.getElementById('form-guru-user').value.trim();
+      const password = document.getElementById('form-guru-pass').value.trim();
+      const jabatan = document.getElementById('form-guru-mapel').value.trim();
+      const jk = document.getElementById('form-guru-jk').value;
+      const kelas = document.getElementById('form-guru-kelas').value;
+      const nohp = document.getElementById('form-guru-nohp').value.trim();
 
-    function deleteGuruAction(nip) {
-      if (confirm(`Yakin ingin menghapus guru NIP ${nip}?`)) {
-        callGasBackend('deleteGuru', nip);
-        showToast("Guru terhapus");
+      const guruData = { nip, nama, username, password, jabatan, jk, kelas, nohp, fotoUrl: '' };
+
+      if (editingGuruNip) {
+        const idx = teachers.findIndex(g => String(g.nip) === String(editingGuruNip));
+        if (idx !== -1) teachers[idx] = { ...teachers[idx], ...guruData };
+      } else {
+        teachers.push(guruData);
       }
+
+      callGasBackend('saveGuru', guruData);
+      closeGuruModal();
+      renderGuruTable();
+      updateMapelDropdowns();
+      showToast("Data guru berhasil disimpan!");
     }
 
-    /* ============ KELOLA KELAS ============ */
+    function deleteGuru(nip) {
+      if (!confirm(`Yakin ingin menghapus guru NIP ${nip}?`)) return;
+      teachers = teachers.filter(g => String(g.nip) !== String(nip));
+      callGasBackend('deleteGuru', { nip: nip });
+      renderGuruTable();
+      updateMapelDropdowns();
+      showToast("Data guru berhasil dihapus!");
+    }
+
+    /* ============ KELOLA KELAS & PROFIL ============ */
     function renderKelasTable() {
       const tbody = document.getElementById('kelas-table-body');
       if (!tbody) return;
 
       if (classList.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="2" class="p-6 text-center text-slate-400 font-semibold">Belum ada master kelas.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="2" class="p-6 text-center text-slate-400 font-semibold">Belum ada kelas terdaftar.</td></tr>`;
         return;
       }
 
@@ -2000,7 +2068,7 @@
         <tr class="hover:bg-slate-50 border-b">
           <td class="px-6 py-3.5 font-bold text-slate-800">${k}</td>
           <td class="px-6 py-3.5 text-right">
-            <button onclick="deleteKelasAction('${k}')" class="px-3 py-1 bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold text-xs rounded-lg"><i class="fa-solid fa-trash mr-1"></i>Hapus</button>
+            <button onclick="deleteKelas('${k}')" class="text-rose-600 hover:text-rose-800 text-xs font-bold"><i class="fa-solid fa-trash mr-1"></i> Hapus</button>
           </td>
         </tr>
       `).join('');
@@ -2009,42 +2077,54 @@
     function handleSaveKelas(e) {
       e.preventDefault();
       const nama = document.getElementById('input-nama-kelas').value.trim();
-      if (nama) {
-        callGasBackend('saveKelas', nama);
-        document.getElementById('input-nama-kelas').value = '';
-        showToast("Kelas berhasil ditambahkan!");
+      if (!nama) return;
+
+      if (classList.includes(nama)) {
+        showToast("Kelas sudah ada!", "error");
+        return;
       }
+
+      classList.push(nama);
+      callGasBackend('saveKelas', { nama: nama });
+      document.getElementById('input-nama-kelas').value = '';
+      updateAllDropdowns();
+      renderKelasTable();
+      showToast("Kelas berhasil ditambahkan!");
     }
 
-    function deleteKelasAction(nama) {
-      if (confirm(`Hapus kelas ${nama}?`)) {
-        callGasBackend('deleteKelas', nama);
-        showToast("Kelas terhapus");
-      }
+    function deleteKelas(nama) {
+      if (!confirm(`Yakin ingin menghapus kelas ${nama}?`)) return;
+      classList = classList.filter(k => k !== nama);
+      callGasBackend('deleteKelas', { nama: nama });
+      updateAllDropdowns();
+      renderKelasTable();
+      showToast("Kelas berhasil dihapus!");
     }
 
-    /* ============ PROFIL SEKOLAH ============ */
     function saveSchoolProfileForm(e) {
       e.preventDefault();
-      const data = {
-        namaSekolah: document.getElementById('profil-nama-sekolah').value.trim(),
-        npsn: document.getElementById('profil-npsn').value.trim(),
-        alamat: document.getElementById('profil-alamat').value.trim(),
-        logoUrl: document.getElementById('profil-logo-url').value.trim()
-      };
-      callGasBackend('savePengaturan', data);
+      schoolProfile.namaSekolah = document.getElementById('profil-nama-sekolah').value.trim();
+      schoolProfile.npsn = document.getElementById('profil-npsn').value.trim();
+      schoolProfile.alamat = document.getElementById('profil-alamat').value.trim();
+      schoolProfile.logoUrl = document.getElementById('profil-logo-url').value.trim();
+
+      callGasBackend('savePengaturan', schoolProfile);
+      applySchoolProfileUI();
       showToast("Profil sekolah berhasil disimpan!");
     }
 
-    /* ============ EXCEL IMPORT & TEMPLATE ============ */
+    /* ============ TEMPLATE & IMPORT EXCEL ============ */
     function downloadExcelTemplate(type) {
-      const sample = [
-        { 'NISN': '1234567890', 'Nama Lengkap': 'Ahmad Fauzi', 'Kelas': classList[0] || 'X IPA 1', 'Jenis Kelamin (L/P)': 'L', 'No HP WA': '081234567890' }
-      ];
-      const worksheet = XLSX.utils.json_to_sheet(sample);
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, "Template Siswa");
-      XLSX.writeFile(workbook, "Template_Import_Siswa.xlsx");
+      let data = [];
+      if (type === 'siswa') {
+        data = [
+          { NISN: '1234567890', Nama: 'Budi Santoso', Kelas: 'X IPA 1', JK: 'L', NoHP: '08123456789' }
+        ];
+      }
+      const ws = XLSX.utils.json_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Template");
+      XLSX.writeFile(wb, `Template_Import_${type}.xlsx`);
     }
 
     function importExcelData(e, type) {
@@ -2052,25 +2132,31 @@
       if (!file) return;
 
       const reader = new FileReader();
-      reader.onload = function(evt) {
+      reader.onload = function (evt) {
         const data = new Uint8Array(evt.target.result);
         const workbook = XLSX.read(data, { type: 'array' });
-        const sheetName = workbook.SheetNames[0];
-        const json = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const json = XLSX.utils.sheet_to_json(worksheet);
 
-        const formatted = json.map(row => ({
-          nisn: String(row['NISN'] || row['nisn'] || '').trim(),
-          nama: String(row['Nama Lengkap'] || row['Nama'] || row['nama'] || '').trim(),
-          kelas: String(row['Kelas'] || row['kelas'] || classList[0] || 'X IPA 1').trim(),
-          jk: String(row['Jenis Kelamin (L/P)'] || row['JK'] || 'L').trim(),
-          nohp: String(row['No HP WA'] || row['No HP'] || '').trim()
-        })).filter(item => item.nisn && item.nama);
+        if (type === 'siswa') {
+          json.forEach(row => {
+            const nisn = String(row.NISN || row.nisn || '').trim();
+            const nama = String(row.Nama || row.nama || '').trim();
+            const kelas = String(row.Kelas || row.kelas || 'X IPA 1').trim();
+            const jk = String(row.JK || row.jk || 'L').trim();
+            const nohp = String(row.NoHP || row.nohp || '').trim();
 
-        if (formatted.length > 0) {
-          callGasBackend('importSiswaData', formatted);
-          showToast(`Berhasil mengimpor ${formatted.length} siswa!`);
-        } else {
-          showToast("Format Excel tidak sesuai!", "error");
+            if (nisn && nama) {
+              const siswaObj = { nisn, nama, kelas, jk, nohp, fotoUrl: '' };
+              const existingIdx = students.findIndex(s => String(s.nisn) === nisn);
+              if (existingIdx !== -1) students[existingIdx] = siswaObj;
+              else students.push(siswaObj);
+              callGasBackend('saveSiswa', siswaObj);
+            }
+          });
+          renderSiswaTable();
+          showToast("Berhasil mengimpor data siswa!");
         }
       };
       reader.readAsArrayBuffer(file);
