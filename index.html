@@ -938,6 +938,7 @@
       updateMapelDropdowns();
     }
 
+    /* Update Opsi Dropdown Filter Mapel secara Otomatis */
     function updateMapelDropdowns() {
       const mapelSet = new Set();
       
@@ -1367,7 +1368,7 @@
       }
       
       const mapelName = document.getElementById('agenda-mapel').value || currentLoggedTeacher?.jabatan || 'Pelajaran';
-      recordAttendanceDirect(nisn, student.nama, student.kelas, 'Hadir', mapelName, 'Siswa');
+      recordAttendanceDirect(nisn, student.nama, student.kelas, 'Hadir', mapelName, 'Siswa', 'Scan QR');
     }
 
     function handleAgendaManualScan() {
@@ -1375,7 +1376,7 @@
       if (val) { processAgendaScan(val); document.getElementById('agenda-manual-nisn').value = ''; }
     }
 
-    async function recordAttendanceDirect(nisn, nama, kelas, status, jenis, peran = 'Siswa') {
+    async function recordAttendanceDirect(nisn, nama, kelas, status, jenis, peran = 'Siswa', method = 'Scan QR') {
       if (isScanProcessing) return;
       isScanProcessing = true;
 
@@ -1402,6 +1403,7 @@
           }
         } else {
           const materiVal = document.getElementById('agenda-materi')?.value.trim() || '-';
+          const teacherName = currentLoggedTeacher ? currentLoggedTeacher.nama : '';
 
           const logEntry = {
             timestamp: `${dateStr} ${now.toLocaleTimeString('id-ID')}`,
@@ -1413,9 +1415,12 @@
             jenisAbsen: jenis, 
             status, 
             peran: peran, 
-            method: 'Scan System',
+            method: method,
             materi: materiVal,
-            guruNip: currentLoggedTeacher ? currentLoggedTeacher.nip : ''
+            judulTema: materiVal,
+            guruNip: teacherName,
+            guruNama: teacherName,
+            guru: teacherName
           };
 
           attendanceLogs.unshift(logEntry);
@@ -1497,13 +1502,13 @@
       const cleanId = String(idCode).trim();
       const student = students.find(s => String(s.nisn).trim() === cleanId);
       if (student) {
-        recordAttendanceDirect(student.nisn, student.nama, student.kelas, currentScanMode, currentJenisAbsen, 'Siswa');
+        recordAttendanceDirect(student.nisn, student.nama, student.kelas, currentScanMode, currentJenisAbsen, 'Siswa', 'Scan QR');
         return;
       }
       
       const teacher = teachers.find(t => String(t.nip).trim() === cleanId);
       if (teacher) {
-        recordAttendanceDirect(teacher.nip, teacher.nama, 'Guru/Staf', currentScanMode, currentJenisAbsen, 'Guru');
+        recordAttendanceDirect(teacher.nip, teacher.nama, 'Guru/Staf', currentScanMode, currentJenisAbsen, 'Guru', 'Scan QR');
         return;
       }
 
@@ -1760,7 +1765,7 @@
         'Kelas': l.kelas,
         'Jenis / Sesi': l.jenisAbsen || 'Masuk Sekolah',
         'Status': l.status,
-        'Judul Materi Pembelajaran': l.materi || '-'
+        'Judul Materi Pembelajaran': l.materi || l.judulTema || l.tema || l.judulMateri || l.judul || '-'
       }));
 
       const worksheet = XLSX.utils.json_to_sheet(dataToExport);
@@ -1807,86 +1812,95 @@
           mClass = String(cand.kelas) === String(currentLoggedTeacher.kelas);
         }
 
-        const alreadyAttended = attendanceLogs.some(log => {
+        const alreadyAbsen = attendanceLogs.some(log => {
           const logNisnNorm = String(log.nisn || '').trim().replace(/^0+/, '');
-          const logDate = String(log.date || log.timestamp || '').split(' ')[0];
+          const logDateStr = String(log.date || log.timestamp || '').split('T')[0].split(' ')[0].trim();
           const logJenis = String(log.jenisAbsen || '').trim().toLowerCase();
+          const reqJenis = String(targetSession).trim().toLowerCase();
 
-          return logNisnNorm === normCandNisn && logDate === dateFilter && logJenis === targetSession.toLowerCase();
+          return logNisnNorm === normCandNisn && logDateStr.includes(dateFilter) && (logJenis === reqJenis || logJenis.includes(reqJenis));
         });
 
-        return mName && mClass && !alreadyAttended;
+        return mName && mClass && !alreadyAbsen;
       });
 
       if (filteredBelum.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-slate-400 font-semibold">Semua pengguna sudah melakukan absensi pada kriteria ini.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-slate-400 font-semibold">Semua pengguna sudah melakukan absensi atau tidak ada data.</td></tr>`;
         return;
       }
 
-      tbody.innerHTML = filteredBelum.map(b => `
-        <tr class="hover:bg-slate-50 border-b">
-          <td class="px-6 py-3.5 font-mono font-bold">${b.nisn}</td>
-          <td class="px-6 py-3.5 font-bold text-slate-800">${b.nama}</td>
-          <td class="px-6 py-3.5"><span class="px-2 py-0.5 ${b.peran === 'Guru' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'} rounded text-xs font-semibold">${b.peran}</span></td>
-          <td class="px-6 py-3.5">${b.kelas}</td>
-          <td class="px-6 py-3.5 text-center">
-            <div class="flex justify-center items-center gap-1.5">
-              <button onclick="manualRecordBelum('${b.nisn}', '${b.nama}', '${b.kelas}', 'Hadir', '${b.peran}')" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs shadow-xs">Hadir</button>
-              <button onclick="manualRecordBelum('${b.nisn}', '${b.nama}', '${b.kelas}', 'Izin', '${b.peran}')" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-lg text-xs shadow-xs">Izin</button>
-              <button onclick="manualRecordBelum('${b.nisn}', '${b.nama}', '${b.kelas}', 'Sakit', '${b.peran}')" class="px-2.5 py-1 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-lg text-xs shadow-xs">Sakit</button>
-              <button onclick="manualRecordBelum('${b.nisn}', '${b.nama}', '${b.kelas}', 'Alfa', '${b.peran}')" class="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg text-xs shadow-xs">Alfa</button>
-            </div>
-          </td>
-        </tr>
-      `).join('');
+      tbody.innerHTML = filteredBelum.map(cand => {
+        const safeNisn = String(cand.nisn).replace(/'/g, "\\'");
+        const safeNama = String(cand.nama).replace(/'/g, "\\'");
+        const safeKelas = String(cand.kelas).replace(/'/g, "\\'");
+        const safePeran = String(cand.peran).replace(/'/g, "\\'");
+
+        return `
+          <tr class="hover:bg-slate-50 border-b">
+            <td class="px-6 py-3.5 font-mono font-bold">${cand.nisn}</td>
+            <td class="px-6 py-3.5 font-bold text-slate-800">${cand.nama}</td>
+            <td class="px-6 py-3.5"><span class="px-2 py-0.5 ${cand.peran === 'Guru' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'} rounded text-xs font-semibold">${cand.peran}</span></td>
+            <td class="px-6 py-3.5">${cand.kelas}</td>
+            <td class="px-6 py-3.5 text-center">
+              <div class="flex items-center justify-center gap-1.5">
+                <button onclick="doManualAbsenBelum('${safeNisn}', '${safeNama}', '${safeKelas}', 'Hadir', '${safePeran}')" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition">Hadir</button>
+                <button onclick="doManualAbsenBelum('${safeNisn}', '${safeNama}', '${safeKelas}', 'Izin', '${safePeran}')" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold transition">Izin</button>
+                <button onclick="doManualAbsenBelum('${safeNisn}', '${safeNama}', '${safeKelas}', 'Sakit', '${safePeran}')" class="px-2.5 py-1 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg text-xs font-bold transition">Sakit</button>
+                <button onclick="doManualAbsenBelum('${safeNisn}', '${safeNama}', '${safeKelas}', 'Alfa', '${safePeran}')" class="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition">Alfa</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
     }
 
-    function manualRecordBelum(nisn, nama, kelas, status, peran) {
-      let jenis = "";
+    function doManualAbsenBelum(nisn, nama, kelas, status, peran) {
+      let targetSession = "";
       if (currentUserRole === 'guru') {
-        jenis = document.getElementById('agenda-mapel')?.value || currentLoggedTeacher?.jabatan || "Pelajaran";
+        targetSession = document.getElementById('agenda-mapel')?.value || currentLoggedTeacher?.jabatan || "Pelajaran";
       } else {
-        jenis = document.getElementById('belum-session-filter')?.value || "Masuk Sekolah";
+        targetSession = document.getElementById('belum-session-filter')?.value || "Masuk Sekolah";
       }
-      recordAttendanceDirect(nisn, nama, kelas, status, jenis, peran);
+
+      recordAttendanceDirect(nisn, nama, kelas, status, targetSession, peran, 'Absensi Manual');
     }
 
-    /* ============ CRUD SISWA ============ */
+    /* ============ CRUD DATA SISWA ============ */
+    function filterSiswaTable() { renderSiswaTable(); }
+
     function renderSiswaTable() {
       const tbody = document.getElementById('siswa-table-body');
       if (!tbody) return;
 
-      const nameSearch = document.getElementById('siswa-search')?.value.toLowerCase().trim() || "";
+      const search = document.getElementById('siswa-search')?.value.toLowerCase().trim() || "";
       const classFilter = document.getElementById('siswa-class-filter')?.value || "ALL";
 
       const filtered = students.filter(s => {
-        const mName = !nameSearch || s.nama.toLowerCase().includes(nameSearch) || String(s.nisn).includes(nameSearch);
-        const mClass = classFilter === 'ALL' || s.kelas === classFilter;
-        return mName && mClass;
+        const mSearch = !search || String(s.nama).toLowerCase().includes(search) || String(s.nisn).includes(search);
+        const mClass = classFilter === 'ALL' || String(s.kelas) === classFilter;
+        return mSearch && mClass;
       });
 
       if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" class="p-6 text-center text-slate-400 font-semibold">Data siswa tidak ditemukan.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="p-6 text-center text-slate-400 font-semibold">Tidak ada data siswa.</td></tr>`;
         return;
       }
 
       tbody.innerHTML = filtered.map(s => `
         <tr class="hover:bg-slate-50 border-b">
-          <td class="px-6 py-3"><img src="${s.fotoUrl || DEFAULT_AVATAR_SVG}" onerror="this.src='${DEFAULT_AVATAR_SVG}'" class="w-8 h-8 rounded-full object-cover"></td>
+          <td class="px-6 py-3.5"><img src="${s.fotoUrl || DEFAULT_AVATAR_SVG}" class="w-8 h-8 rounded-full object-cover border" onerror="this.src='${DEFAULT_AVATAR_SVG}'"></td>
           <td class="px-6 py-3.5 font-mono font-bold">${s.nisn}</td>
           <td class="px-6 py-3.5 font-bold text-slate-800">${s.nama}</td>
-          <td class="px-6 py-3.5">${s.kelas}</td>
+          <td class="px-6 py-3.5"><span class="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded text-xs font-bold">${s.kelas}</span></td>
           <td class="px-6 py-3.5">${s.jk || 'L'}</td>
           <td class="px-6 py-3.5 text-xs text-slate-500">${s.nohp || '-'}</td>
-          <td class="px-6 py-3.5 text-right space-x-1">
-            <button onclick="editSiswa('${s.nisn}')" class="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg"><i class="fa-solid fa-pen-to-square"></i></button>
-            <button onclick="deleteSiswa('${s.nisn}')" class="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg"><i class="fa-solid fa-trash"></i></button>
+          <td class="px-6 py-3.5 text-right space-x-2">
+            <button onclick="openEditSiswaModal('${s.nisn}')" class="text-indigo-600 hover:text-indigo-800 font-bold text-xs"><i class="fa-solid fa-pen"></i> Edit</button>
+            <button onclick="deleteSiswa('${s.nisn}')" class="text-rose-600 hover:text-rose-800 font-bold text-xs"><i class="fa-solid fa-trash"></i> Hapus</button>
           </td>
         </tr>
       `).join('');
     }
-
-    function filterSiswaTable() { renderSiswaTable(); }
 
     function openAddSiswaModal() {
       editingSiswaNisn = null;
@@ -1898,9 +1912,7 @@
       document.getElementById('modal-siswa').classList.remove('hidden');
     }
 
-    function closeSiswaModal() { document.getElementById('modal-siswa').classList.add('hidden'); }
-
-    function editSiswa(nisn) {
+    function openEditSiswaModal(nisn) {
       const s = students.find(item => String(item.nisn) === String(nisn));
       if (!s) return;
       editingSiswaNisn = nisn;
@@ -1914,6 +1926,8 @@
       document.getElementById('modal-siswa').classList.remove('hidden');
     }
 
+    function closeSiswaModal() { document.getElementById('modal-siswa').classList.add('hidden'); }
+
     function saveSiswaForm(e) {
       e.preventDefault();
       const nisn = document.getElementById('form-nisn').value.trim();
@@ -1922,130 +1936,88 @@
       const jk = document.getElementById('form-jk').value;
       const nohp = document.getElementById('form-nohp').value.trim();
 
-      const payload = { nisn, nama, kelas, jk, nohp, fotoUrl: '' };
-      showToast("Menyimpan data siswa...");
-      closeSiswaModal();
+      const studentData = { nisn, nama, kelas, jk, nohp };
 
-      callGasBackend('saveSiswa', payload, () => {
-        showToast("Data Siswa Berhasil Disimpan!");
-      });
+      if (editingSiswaNisn) {
+        const idx = students.findIndex(s => String(s.nisn) === String(editingSiswaNisn));
+        if (idx !== -1) students[idx] = { ...students[idx], ...studentData };
+        callGasBackend('updateSiswa', studentData);
+        showToast("Data siswa diperbarui");
+      } else {
+        students.push(studentData);
+        callGasBackend('addSiswa', studentData);
+        showToast("Siswa baru berhasil ditambahkan");
+      }
+
+      closeSiswaModal();
+      renderSiswaTable();
     }
 
     function deleteSiswa(nisn) {
-      if (!confirm(`Yakin ingin menghapus siswa dengan NISN: ${nisn}?`)) return;
-      showToast("Menghapus data siswa...");
-      callGasBackend('deleteSiswa', nisn, () => {
-        showToast("Siswa Berhasil Dihapus");
-      });
+      if (!confirm(`Yakin ingin menghapus siswa dengan NISN ${nisn}?`)) return;
+      students = students.filter(s => String(s.nisn) !== String(nisn));
+      callGasBackend('deleteSiswa', { nisn: nisn });
+      showToast("Data siswa berhasil dihapus");
+      renderSiswaTable();
     }
 
-    function downloadExcelTemplate(type) {
-      if (type === 'siswa') {
-        const templateData = [
-          { NISN: '1001', Nama: 'Ahmad Dahlan', Kelas: 'X IPA 1', JK: 'L', NoHP: '081234567890' },
-          { NISN: '1002', Nama: 'Siti Nurhaliza', Kelas: 'X IPA 1', JK: 'P', NoHP: '081234567891' }
-        ];
-        const worksheet = XLSX.utils.json_to_sheet(templateData);
-        const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, "Template_Siswa");
-        XLSX.writeFile(workbook, "Template_Import_Siswa.xlsx");
-      }
-    }
+    /* ============ CRUD DATA GURU ============ */
+    function filterGuruTable() { renderGuruTable(); }
 
-    function importExcelData(event, type) {
-      const file = event.target.files[0];
-      if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = function (e) {
-        try {
-          const data = new Uint8Array(e.target.result);
-          const workbook = XLSX.read(data, { type: 'array' });
-          const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-          const jsonData = XLSX.utils.sheet_to_json(firstSheet);
-
-          if (jsonData.length === 0) {
-            showToast("File Excel kosong atau format tidak sesuai!", "error");
-            return;
-          }
-
-          const importedSiswa = jsonData.map(item => ({
-            nisn: String(item.NISN || item.nisn || '').trim(),
-            nama: String(item.Nama || item.nama || '').trim(),
-            kelas: String(item.Kelas || item.kelas || '').trim(),
-            jk: String(item.JK || item.jk || 'L').trim(),
-            nohp: String(item.NoHP || item.nohp || '').trim(),
-            fotoUrl: ''
-          })).filter(s => s.nisn && s.nama);
-
-          showToast(`Mengimpor ${importedSiswa.length} data siswa...`);
-          callGasBackend('importSiswaBatch', importedSiswa, () => {
-            showToast("Import Data Siswa Berhasil!");
-          });
-        } catch (err) {
-          console.error(err);
-          showToast("Gagal membaca file Excel!", "error");
-        }
-      };
-      reader.readAsArrayBuffer(file);
-    }
-
-    /* ============ CRUD GURU ============ */
     function renderGuruTable() {
       const tbody = document.getElementById('guru-table-body');
       if (!tbody) return;
 
-      const nameSearch = document.getElementById('guru-search')?.value.toLowerCase().trim() || "";
-      const filtered = teachers.filter(g => !nameSearch || g.nama.toLowerCase().includes(nameSearch) || String(g.nip).includes(nameSearch));
+      const search = document.getElementById('guru-search')?.value.toLowerCase().trim() || "";
+
+      const filtered = teachers.filter(g => {
+        return !search || String(g.nama).toLowerCase().includes(search) || String(g.nip).includes(search);
+      });
 
       if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-slate-400 font-semibold">Data guru tidak ditemukan.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-slate-400 font-semibold">Tidak ada data guru.</td></tr>`;
         return;
       }
 
       tbody.innerHTML = filtered.map(g => `
         <tr class="hover:bg-slate-50 border-b">
-          <td class="px-6 py-3"><img src="${g.fotoUrl || DEFAULT_AVATAR_SVG}" onerror="this.src='${DEFAULT_AVATAR_SVG}'" class="w-8 h-8 rounded-full object-cover"></td>
+          <td class="px-6 py-3.5"><img src="${g.fotoUrl || DEFAULT_AVATAR_SVG}" class="w-8 h-8 rounded-full object-cover border" onerror="this.src='${DEFAULT_AVATAR_SVG}'"></td>
           <td class="px-6 py-3.5">
-            <div class="font-mono font-bold text-slate-800">${g.nip}</div>
-            <div class="text-[10px] text-slate-400">User: <span class="font-semibold text-slate-600">${g.username}</span> | Pass: <span class="font-semibold text-slate-600">${g.password}</span></div>
+            <div class="font-mono font-bold">${g.nip}</div>
+            <div class="text-[11px] text-slate-500">User: <span class="font-semibold text-slate-700">${g.username}</span> | Pass: <span class="font-semibold text-slate-700">${g.password}</span></div>
           </td>
           <td class="px-6 py-3.5 font-bold text-slate-800">${g.nama}</td>
           <td class="px-6 py-3.5">
-            <div class="font-bold text-xs text-indigo-700">${g.jabatan}</div>
-            <div class="text-[11px] text-slate-500">Kelas: ${g.kelas}</div>
+            <div class="font-semibold text-indigo-700">${g.jabatan || 'Pengajar'}</div>
+            <div class="text-xs text-slate-500">Mengajar Kelas: <span class="font-bold text-slate-700">${g.kelas}</span></div>
           </td>
           <td class="px-6 py-3.5 text-xs text-slate-500">${g.nohp || '-'}</td>
-          <td class="px-6 py-3.5 text-right space-x-1">
-            <button onclick="editGuru('${g.nip}')" class="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg"><i class="fa-solid fa-pen-to-square"></i></button>
-            <button onclick="deleteGuru('${g.nip}')" class="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg"><i class="fa-solid fa-trash"></i></button>
+          <td class="px-6 py-3.5 text-right space-x-2">
+            <button onclick="openEditGuruModal('${g.nip}')" class="text-indigo-600 hover:text-indigo-800 font-bold text-xs"><i class="fa-solid fa-pen"></i> Edit</button>
+            <button onclick="deleteGuru('${g.nip}')" class="text-rose-600 hover:text-rose-800 font-bold text-xs"><i class="fa-solid fa-trash"></i> Hapus</button>
           </td>
         </tr>
       `).join('');
     }
 
-    function filterGuruTable() { renderGuruTable(); }
-
     function openAddGuruModal() {
       editingGuruNip = null;
-      document.getElementById('modal-guru-title').innerText = "Tambah Guru & Penugasan";
+      document.getElementById('modal-guru-title').innerText = "Tambah Guru & Tugas";
       document.getElementById('form-guru-nip').value = '';
       document.getElementById('form-guru-nip').readOnly = false;
       document.getElementById('form-guru-nama').value = '';
       document.getElementById('form-guru-user').value = '';
-      document.getElementById('form-guru-pass').value = '123456';
+      document.getElementById('form-guru-pass').value = '';
       document.getElementById('form-guru-mapel').value = '';
       document.getElementById('form-guru-nohp').value = '';
       document.getElementById('modal-guru').classList.remove('hidden');
     }
 
-    function closeGuruModal() { document.getElementById('modal-guru').classList.add('hidden'); }
-
-    function editGuru(nip) {
+    function openEditGuruModal(nip) {
       const g = teachers.find(item => String(item.nip) === String(nip));
       if (!g) return;
       editingGuruNip = nip;
-      document.getElementById('modal-guru-title').innerText = "Edit Data Guru";
+      document.getElementById('modal-guru-title').innerText = "Edit Data Guru & Penugasan";
       document.getElementById('form-guru-nip').value = g.nip;
       document.getElementById('form-guru-nip').readOnly = true;
       document.getElementById('form-guru-nama').value = g.nama;
@@ -2058,6 +2030,8 @@
       document.getElementById('modal-guru').classList.remove('hidden');
     }
 
+    function closeGuruModal() { document.getElementById('modal-guru').classList.add('hidden'); }
+
     function saveGuruForm(e) {
       e.preventDefault();
       const nip = document.getElementById('form-guru-nip').value.trim();
@@ -2069,21 +2043,29 @@
       const kelas = document.getElementById('form-guru-kelas').value;
       const nohp = document.getElementById('form-guru-nohp').value.trim();
 
-      const payload = { nip, nama, username, password, jabatan, jk, kelas, nohp, fotoUrl: '' };
-      showToast("Menyimpan data guru...");
-      closeGuruModal();
+      const teacherData = { nip, nama, username, password, jabatan, jk, kelas, nohp };
 
-      callGasBackend('saveGuru', payload, () => {
-        showToast("Data Guru Berhasil Disimpan!");
-      });
+      if (editingGuruNip) {
+        const idx = teachers.findIndex(g => String(g.nip) === String(editingGuruNip));
+        if (idx !== -1) teachers[idx] = { ...teachers[idx], ...teacherData };
+        callGasBackend('updateGuru', teacherData);
+        showToast("Data guru diperbarui");
+      } else {
+        teachers.push(teacherData);
+        callGasBackend('addGuru', teacherData);
+        showToast("Guru baru berhasil ditambahkan");
+      }
+
+      closeGuruModal();
+      renderGuruTable();
     }
 
     function deleteGuru(nip) {
-      if (!confirm(`Yakin ingin menghapus guru NIP: ${nip}?`)) return;
-      showToast("Menghapus guru...");
-      callGasBackend('deleteGuru', nip, () => {
-        showToast("Guru Berhasil Dihapus");
-      });
+      if (!confirm(`Yakin ingin menghapus guru dengan NIP ${nip}?`)) return;
+      teachers = teachers.filter(g => String(g.nip) !== String(nip));
+      callGasBackend('deleteGuru', { nip: nip });
+      showToast("Data guru berhasil dihapus");
+      renderGuruTable();
     }
 
     /* ============ KELOLA KELAS ============ */
@@ -2100,7 +2082,7 @@
         <tr class="hover:bg-slate-50 border-b">
           <td class="px-6 py-3.5 font-bold text-slate-800">${k}</td>
           <td class="px-6 py-3.5 text-right">
-            <button onclick="deleteKelas('${k}')" class="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg"><i class="fa-solid fa-trash"></i></button>
+            <button onclick="deleteKelas('${k}')" class="text-rose-600 hover:text-rose-800 font-bold text-xs"><i class="fa-solid fa-trash"></i> Hapus</button>
           </td>
         </tr>
       `).join('');
@@ -2111,36 +2093,92 @@
       const namaKelas = document.getElementById('input-nama-kelas').value.trim();
       if (!namaKelas) return;
 
-      showToast("Menambahkan kelas...");
-      document.getElementById('input-nama-kelas').value = '';
+      if (classList.includes(namaKelas)) {
+        showToast("Nama kelas sudah ada!", "error");
+        return;
+      }
 
-      callGasBackend('saveKelas', namaKelas, () => {
-        showToast(`Kelas ${namaKelas} berhasil ditambahkan`);
-      });
+      classList.push(namaKelas);
+      callGasBackend('addKelas', { nama: namaKelas });
+      document.getElementById('input-nama-kelas').value = '';
+      showToast("Kelas baru ditambahkan");
+      updateAllDropdowns();
+      renderKelasTable();
     }
 
     function deleteKelas(namaKelas) {
-      if (!confirm(`Yakin hapus kelas ${namaKelas}?`)) return;
-      showToast("Menghapus kelas...");
-      callGasBackend('deleteKelas', namaKelas, () => {
-        showToast(`Kelas ${namaKelas} dihapus`);
-      });
+      if (!confirm(`Yakin ingin menghapus kelas ${namaKelas}?`)) return;
+      classList = classList.filter(k => k !== namaKelas);
+      callGasBackend('deleteKelas', { nama: namaKelas });
+      showToast("Kelas dihapus");
+      updateAllDropdowns();
+      renderKelasTable();
     }
 
     /* ============ PROFIL SEKOLAH ============ */
     function saveSchoolProfileForm(e) {
-      if (e) e.preventDefault();
-      const namaSekolah = document.getElementById('profil-nama-sekolah').value.trim();
-      const npsn = document.getElementById('profil-npsn').value.trim();
-      const alamat = document.getElementById('profil-alamat').value.trim();
-      const logoUrl = document.getElementById('profil-logo-url').value.trim();
+      e.preventDefault();
+      schoolProfile.namaSekolah = document.getElementById('profil-nama-sekolah').value.trim();
+      schoolProfile.npsn = document.getElementById('profil-npsn').value.trim();
+      schoolProfile.alamat = document.getElementById('profil-alamat').value.trim();
+      schoolProfile.logoUrl = document.getElementById('profil-logo-url').value.trim();
 
-      const payload = { namaSekolah, npsn, alamat, logoUrl };
-      showToast("Menyimpan Profil Sekolah...");
+      callGasBackend('savePengaturan', schoolProfile);
+      applySchoolProfileUI();
+      showToast("Profil sekolah diperbarui");
+    }
 
-      callGasBackend('savePengaturan', payload, () => {
-        showToast("Profil Sekolah Berhasil Diperbarui!");
-      });
+    /* ============ EXCEL TEMPLATE & IMPORT ============ */
+    function downloadExcelTemplate(type) {
+      let data = [];
+      if (type === 'siswa') {
+        data = [
+          { NISN: '1234567890', Nama: 'Ahmad Fajar', Kelas: classList[0] || 'X IPA 1', JK: 'L', NoHP: '081234567890' }
+        ];
+      }
+      const ws = XLSX.utils.json_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Template");
+      XLSX.writeFile(wb, `Template_Import_${type}.xlsx`);
+    }
+
+    function importExcelData(e, type) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function (evt) {
+        try {
+          const data = new Uint8Array(evt.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const firstSheetName = workbook.SheetNames[0];
+          const json = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName]);
+
+          if (type === 'siswa') {
+            let count = 0;
+            json.forEach(row => {
+              const nisn = String(row.NISN || row.nisn || '').trim();
+              const nama = String(row.Nama || row.nama || '').trim();
+              const kelas = String(row.Kelas || row.kelas || classList[0] || 'X IPA 1').trim();
+              const jk = String(row.JK || row.jk || 'L').trim();
+              const nohp = String(row.NoHP || row.nohp || '').trim();
+
+              if (nisn && nama) {
+                const sObj = { nisn, nama, kelas, jk, nohp };
+                students.push(sObj);
+                callGasBackend('addSiswa', sObj);
+                count++;
+              }
+            });
+            showToast(`Berhasil mengimpor ${count} siswa!`);
+            renderSiswaTable();
+          }
+        } catch (err) {
+          console.error(err);
+          showToast("Gagal membaca file Excel", "error");
+        }
+      };
+      reader.readAsArrayBuffer(file);
     }
   </script>
 </body>
