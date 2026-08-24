@@ -771,9 +771,6 @@
     const DEFAULT_LOGO_SVG = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%234f46e5'/><path d='M50 20L15 40v10h70V40L50 20zM25 55v25h10V55H25zm20 0v25h10V55H45zm20 0v25h10V55H65zM15 85v5h70v-5H15z' fill='%23ffffff'/></svg>";
     const DEFAULT_AVATAR_SVG = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23e2e8f0'/><circle cx='50' cy='40' r='22' fill='%2394a3b8'/><path d='M15 90c0-19.3 15.7-35 35-35s35 15.7 35 35z' fill='%2394a3b8'/></svg>";
 
-    const SESSION_KEY = "absensi_qr_active_session";
-    const LAST_VIEW_KEY = "absensi_qr_last_view";
-
     let students = [], teachers = [], attendanceLogs = [], classList = [], adminUsers = [];
     let schoolProfile = { namaSekolah:'SMA NEGERI 1 EDUKASI', npsn:'20123456', alamat:'Jl. Pendidikan No. 45', logoUrl:'' };
     let currentUserRole = null;
@@ -810,38 +807,6 @@
       initApp();
       setInterval(syncDataRealtime, 5000);
     });
-
-    function checkAndRestoreSession() {
-      const savedSession = localStorage.getItem(SESSION_KEY);
-      if (!savedSession) return false;
-
-      try {
-        const session = JSON.parse(savedSession);
-        if (session && (session.role === 'admin' || session.role === 'guru')) {
-          currentUserRole = session.role;
-          if (session.role === 'guru' && session.teacherData) {
-            currentLoggedTeacher = session.teacherData;
-          }
-          document.getElementById('auth-screen').classList.add('hidden');
-          updateRoleBasedVisibility();
-          renderNavMenu();
-
-          const savedView = localStorage.getItem(LAST_VIEW_KEY);
-          const defaultView = session.role === 'admin' ? 'dashboard' : 'agenda';
-          const targetView = savedView || defaultView;
-
-          const allowedNavs = session.role === 'admin' ? adminNavItems : guruNavItems;
-          const isValidView = allowedNavs.some(n => n.id === targetView);
-
-          switchView(isValidView ? targetView : defaultView);
-          return true;
-        }
-      } catch (e) {
-        console.error("Gagal membaca session tersimpan:", e);
-        localStorage.removeItem(SESSION_KEY);
-      }
-      return false;
-    }
 
     function getTodayLocalDateStr() {
       const d = new Date();
@@ -933,16 +898,6 @@
       if (data.pengaturan && data.pengaturan.length > 0) schoolProfile = { ...schoolProfile, ...data.pengaturan[0] };
       if (data.users) adminUsers = data.users;
 
-      // Update data guru logged in jika session aktif
-      if (currentUserRole === 'guru' && currentLoggedTeacher) {
-        const updatedTeacher = teachers.find(t => String(t.nip) === String(currentLoggedTeacher.nip));
-        if (updatedTeacher) {
-          currentLoggedTeacher = updatedTeacher;
-          localStorage.setItem(SESSION_KEY, JSON.stringify({ role: 'guru', teacherData: currentLoggedTeacher }));
-          setupTeacherAgendaView();
-        }
-      }
-
       applySchoolProfileUI();
       updateAllDropdowns();
       refreshCurrentViewData();
@@ -954,7 +909,6 @@
       const todayBelumFilter = document.getElementById('belum-date-filter');
       if (todayBelumFilter) todayBelumFilter.value = getTodayLocalDateStr();
 
-      checkAndRestoreSession();
       callGasBackend('getInitialData');
     }
 
@@ -1158,8 +1112,6 @@
         currentUserRole = 'admin';
         currentLoggedTeacher = null;
 
-        localStorage.setItem(SESSION_KEY, JSON.stringify({ role: 'admin' }));
-
         document.getElementById('admin-user').value = '';
         document.getElementById('admin-pass').value = '';
 
@@ -1183,8 +1135,6 @@
         currentUserRole = 'guru';
         currentLoggedTeacher = teacher;
         
-        localStorage.setItem(SESSION_KEY, JSON.stringify({ role: 'guru', teacherData: teacher }));
-
         document.getElementById('guru-user').value = '';
         document.getElementById('guru-pass').value = '';
 
@@ -1225,9 +1175,6 @@
     function logoutApp() {
       currentUserRole = null;
       currentLoggedTeacher = null;
-      localStorage.removeItem(SESSION_KEY);
-      localStorage.removeItem(LAST_VIEW_KEY);
-
       if (isCameraActive) stopCamera();
       if (isAgendaCamActive) stopCameraAgenda();
       document.getElementById('auth-screen').classList.remove('hidden');
@@ -1248,8 +1195,6 @@
 
     function switchView(viewId) {
       currentActiveView = viewId;
-      localStorage.setItem(LAST_VIEW_KEY, viewId);
-
       if (viewId !== 'scan' && isCameraActive) stopCamera();
       if (viewId !== 'agenda' && isAgendaCamActive) stopCameraAgenda();
       document.querySelectorAll('.page-view').forEach(el => el.classList.add('hidden'));
@@ -1756,137 +1701,383 @@
         b.className = "scan-mode-btn py-2 px-2 rounded-xl border-2 text-xs font-bold text-center border-slate-200 bg-slate-50 text-slate-600";
       });
       const activeBtn = document.getElementById('mode-' + mode);
-      if (activeBtn) {
-        activeBtn.className = "scan-mode-btn py-2 px-2 rounded-xl border-2 text-xs font-bold text-center border-indigo-500 bg-indigo-50 text-indigo-700";
-      }
+      if (activeBtn) activeBtn.className = "scan-mode-btn py-2 px-2 rounded-xl border-2 text-xs font-bold text-center border-indigo-500 bg-indigo-50 text-indigo-700";
     }
 
     /* ============ CETAK KARTU ============ */
     function renderKtsCards() {
-      const cardType = document.getElementById('kts-type-filter')?.value || 'SISWA';
+      const container = document.getElementById('print-section');
+      if (!container) return;
+      container.innerHTML = '';
+
+      const typeFilter = document.getElementById('kts-type-filter')?.value || 'SISWA';
       const classFilter = document.getElementById('kts-class-filter')?.value || 'ALL';
-      const printSection = document.getElementById('print-section');
-      if (!printSection) return;
+      const logoSrc = schoolProfile.logoUrl && schoolProfile.logoUrl.trim() !== '' ? schoolProfile.logoUrl : DEFAULT_LOGO_SVG;
 
-      printSection.innerHTML = '';
-      const listToRender = cardType === 'SISWA' 
-        ? students.filter(s => classFilter === 'ALL' || s.kelas === classFilter)
-        : teachers;
+      let listData = [];
+      if (typeFilter === 'SISWA') {
+        listData = students.filter(s => classFilter === 'ALL' || s.kelas === classFilter).map(s => ({
+          id: s.nisn,
+          badgeTitle: 'KARTU SISWA',
+          headerClass: 'card-header-siswa',
+          nama: s.nama,
+          infoBadge: `Kelas: ${s.kelas}`,
+          idLabel: 'ID',
+          foto: s.fotoUrl && s.fotoUrl.trim() !== '' ? s.fotoUrl : DEFAULT_AVATAR_SVG
+        }));
+      } else {
+        listData = teachers.map(g => ({
+          id: g.nip,
+          badgeTitle: 'KARTU GURU / STAF',
+          headerClass: 'card-header-guru',
+          nama: g.nama,
+          infoBadge: null,
+          idLabel: 'ID',
+          foto: g.fotoUrl && g.fotoUrl.trim() !== '' ? g.fotoUrl : DEFAULT_AVATAR_SVG
+        }));
+      }
 
-      if (listToRender.length === 0) {
-        printSection.innerHTML = `<div class="col-span-full py-12 text-center text-slate-400 font-semibold text-xs">Tidak ada data untuk dicetak.</div>`;
+      if (listData.length === 0) {
+        container.innerHTML = `<div class="col-span-full py-12 text-center text-slate-400 font-semibold">Tidak ada data untuk dicetak. Silakan pilih kategori/kelas lain.</div>`;
         return;
       }
 
-      listToRender.forEach((item, index) => {
-        const idVal = item.nisn || item.nip;
-        const nameVal = item.nama;
-        const subInfo = cardType === 'SISWA' ? `Kelas: ${item.kelas}` : (item.jabatan || 'Guru');
-        const headerClass = cardType === 'SISWA' ? 'card-header-siswa' : 'card-header-guru';
-        const badgeTitle = cardType === 'SISWA' ? 'KARTU TANDA SISWA' : 'KARTU TANDA GURU';
-        const photoUrl = item.fotoUrl || DEFAULT_AVATAR_SVG;
-        const logoSrc = schoolProfile.logoUrl || DEFAULT_LOGO_SVG;
+      listData.forEach((item, index) => {
+        const cardContainerId = `qr-card-item-${index}`;
+        const infoBadgeHtml = item.infoBadge ? `<div class="info-badge">${item.infoBadge}</div>` : '';
 
-        const cardContainer = document.createElement('div');
-        cardContainer.className = 'kts-card';
-        cardContainer.innerHTML = `
-          <div class="card-header ${headerClass}">
-            <img src="${logoSrc}" class="logo" alt="Logo">
-            <h2>${schoolProfile.namaSekolah || 'NAMA SEKOLAH'}</h2>
-            <div class="badge-title">${badgeTitle}</div>
-          </div>
-          <div class="card-body">
-            <div class="photo-frame">
-              <img src="${photoUrl}" alt="Foto" onerror="this.src='${DEFAULT_AVATAR_SVG}'">
+        const cardHtml = `
+          <div class="kts-card">
+            <div class="card-header ${item.headerClass}">
+              <img src="${logoSrc}" alt="Logo" class="logo">
+              <h2>${schoolProfile.namaSekolah}</h2>
+              <div class="badge-title">${item.badgeTitle}</div>
             </div>
-            <div class="user-name">${nameVal}</div>
-            <div class="user-id">${cardType === 'SISWA' ? 'NISN' : 'NIP'}: <span>${idVal}</span></div>
-            <div class="info-badge">${subInfo}</div>
-            <div class="qr-section" id="qrcode-box-${index}"></div>
-          </div>
-          <div class="card-footer">
-            <span>NPSN: ${schoolProfile.npsn || '-'}</span>
-            <span>PRESENSI SYSTEM</span>
+
+            <div class="card-body">
+              <div class="photo-frame">
+                <img src="${item.foto}" alt="${item.nama}" onerror="this.src='${DEFAULT_AVATAR_SVG}'">
+              </div>
+
+              <div class="user-name">${item.nama}</div>
+              <div class="user-id">${item.idLabel}: <span>${item.id}</span></div>
+              ${infoBadgeHtml}
+
+              <div class="qr-section">
+                <div id="${cardContainerId}"></div>
+              </div>
+            </div>
+
+            <div class="card-footer">
+              <span>NPSN: ${schoolProfile.npsn || '20123456'}</span>
+              <span>QR SYSTEM</span>
+            </div>
           </div>
         `;
+        container.insertAdjacentHTML('beforeend', cardHtml);
 
-        printSection.appendChild(cardContainer);
-
-        const qrBox = cardContainer.querySelector(`#qrcode-box-${index}`);
-        if (qrBox) {
-          try {
-            new QRCode(qrBox, {
-              text: String(idVal),
-              width: 58,
-              height: 58,
-              correctLevel: QRCode.CorrectLevel.M
+        setTimeout(() => {
+          const qrTarget = document.getElementById(cardContainerId);
+          if (qrTarget) {
+            qrTarget.innerHTML = '';
+            new QRCode(qrTarget, {
+              text: String(item.id),
+              width: 60,
+              height: 60,
+              colorDark: "#0f172a",
+              colorLight: "#ffffff",
+              correctLevel: QRCode.CorrectLevel.H
             });
-          } catch(e) {
-            qrBox.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=58x58&data=${encodeURIComponent(idVal)}" class="w-[58px] h-[58px]">`;
+          }
+        }, 50);
+      });
+    }
+
+    /* ============ REKAP ABSENSI LOGIC ============ */
+    function getFilteredRekapData() {
+      const dateFilter = document.getElementById('rekap-date-filter')?.value || getTodayLocalDateStr();
+      const nameSearch = document.getElementById('rekap-name-search')?.value.toLowerCase().trim() || "";
+      const classFilter = document.getElementById('rekap-class-filter')?.value || "ALL";
+      const mapelFilter = document.getElementById('rekap-mapel-filter')?.value || "ALL";
+      
+      const roleFilter = currentUserRole === 'admin' ? (document.getElementById('rekap-role-filter')?.value || "ALL") : "ALL";
+      const sessionFilter = currentUserRole === 'admin' ? (document.getElementById('rekap-session-filter')?.value || "ALL") : "ALL";
+
+      return attendanceLogs.filter(l => {
+        const logDateStr = String(l.date || l.timestamp || '').split('T')[0].split(' ')[0].trim();
+        const mDate = !dateFilter || logDateStr === dateFilter || logDateStr.includes(dateFilter);
+        const mName = !nameSearch || String(l.nama || '').toLowerCase().includes(nameSearch) || String(l.nisn || '').includes(nameSearch);
+        const mClass = classFilter === 'ALL' || String(l.kelas) === classFilter;
+        
+        let mRole = true;
+        if (roleFilter !== 'ALL') {
+          const itemPeran = l.peran || 'Siswa';
+          mRole = itemPeran.toLowerCase() === roleFilter.toLowerCase();
+        }
+
+        let mMapel = true;
+        if (mapelFilter !== 'ALL') {
+          const logJenis = String(l.jenisAbsen || '').toLowerCase();
+          mMapel = logJenis.includes(mapelFilter.toLowerCase());
+        }
+
+        let mSession = true;
+        if (currentUserRole === 'admin') {
+          if (sessionFilter !== 'ALL') {
+            mSession = l.jenisAbsen && String(l.jenisAbsen).toLowerCase().includes(sessionFilter.toLowerCase());
+          }
+        } else if (currentUserRole === 'guru' && currentLoggedTeacher) {
+          const rawTeacherMapel = String(currentLoggedTeacher.jabatan || '').trim().toLowerCase();
+          const teacherMapels = rawTeacherMapel.split(/[,;]+/).map(m => m.trim()).filter(Boolean);
+          const logJenis = String(l.jenisAbsen || '').trim().toLowerCase();
+          const logStatus = String(l.status || '').trim().toLowerCase();
+
+          const isMapelGuru = teacherMapels.some(m => logJenis === m || logJenis.includes(m));
+          const isMasukNonHadir = logJenis.includes('masuk sekolah') && (logStatus === 'izin' || logStatus === 'sakit' || logStatus === 'alfa');
+
+          mSession = isMapelGuru || isMasukNonHadir;
+        }
+
+        let mTeacherClass = true;
+        if (currentUserRole === 'guru' && currentLoggedTeacher) {
+          if (currentLoggedTeacher.kelas !== 'Semua') {
+            mTeacherClass = String(l.kelas) === String(currentLoggedTeacher.kelas);
           }
         }
+
+        return mDate && mName && mClass && mRole && mSession && mTeacherClass && mMapel;
       });
     }
 
-    /* ============ KELOLA DATA SISWA ============ */
-    function renderSiswaTable() {
-      filterSiswaTable();
-    }
-
-    function filterSiswaTable() {
-      const q = document.getElementById('siswa-search')?.value.toLowerCase().trim() || '';
-      const cf = document.getElementById('siswa-class-filter')?.value || 'ALL';
-      const tb = document.getElementById('siswa-table-body');
-      if (!tb) return;
-
-      const filtered = students.filter(s => {
-        const matchQ = String(s.nisn).toLowerCase().includes(q) || String(s.nama).toLowerCase().includes(q);
-        const matchC = cf === 'ALL' || s.kelas === cf;
-        return matchQ && matchC;
-      });
+    function renderRekapTable() {
+      const tbody = document.getElementById('rekap-table-body');
+      if (!tbody) return;  
+      
+      const filtered = getFilteredRekapData();
 
       if (filtered.length === 0) {
-        tb.innerHTML = `<tr><td colspan="7" class="px-6 py-6 text-center text-slate-400 text-xs">Data siswa tidak ditemukan.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="p-6 text-center text-slate-400 font-semibold">Tidak ada data rekap absensi untuk kriteria yang dipilih.</td></tr>`;
         return;
       }
 
-      tb.innerHTML = filtered.map(s => `
-        <tr class="hover:bg-slate-50 border-b border-slate-100">
-          <td class="px-6 py-3"><img src="${s.fotoUrl || DEFAULT_AVATAR_SVG}" class="w-8 h-8 rounded-full object-cover border" onerror="this.src='${DEFAULT_AVATAR_SVG}'"></td>
-          <td class="px-6 py-3 font-mono font-bold text-xs">${s.nisn}</td>
-          <td class="px-6 py-3 font-bold text-slate-800 text-xs">${s.nama}</td>
-          <td class="px-6 py-3 text-xs font-semibold">${s.kelas}</td>
-          <td class="px-6 py-3 text-xs">${s.jk || 'L'}</td>
-          <td class="px-6 py-3 text-xs">${s.nohp || '-'}</td>
-          <td class="px-6 py-3 text-right text-xs space-x-1">
-            <button onclick="editSiswa('${s.nisn}')" class="px-2 py-1 bg-amber-50 text-amber-600 rounded-md font-bold hover:bg-amber-100"><i class="fa-solid fa-pen-to-square"></i></button>
-            <button onclick="deleteSiswa('${s.nisn}')" class="px-2 py-1 bg-rose-50 text-rose-600 rounded-md font-bold hover:bg-rose-100"><i class="fa-solid fa-trash"></i></button>
+      tbody.innerHTML = filtered.map(l => {
+        const logNisnStr = String(l.nisn || '').trim();
+        const logNisnNorm = logNisnStr.replace(/^0+/, '');
+        let displayNisn = logNisnStr;
+        
+        if (logNisnNorm) {
+          const masterUser = (students || []).find(s => String(s.nisn || '').trim().replace(/^0+/, '') === logNisnNorm) ||
+                             (teachers || []).find(g => String(g.nip || '').trim().replace(/^0+/, '') === logNisnNorm);
+          if (masterUser) {
+            displayNisn = String(masterUser.nisn || masterUser.nip || logNisnStr);
+          }
+        }
+
+        return `
+          <tr class="hover:bg-slate-50 border-b">
+            <td class="px-6 py-3.5 text-xs font-medium">${l.timestamp || l.time || '-'}</td>
+            <td class="px-6 py-3.5 font-mono font-bold">${displayNisn}</td>
+            <td class="px-6 py-3.5 font-bold text-slate-800">${l.nama}</td>
+            <td class="px-6 py-3.5"><span class="px-2 py-0.5 ${l.peran === 'Guru' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'} rounded text-xs font-semibold">${l.peran || 'Siswa'}</span></td>
+            <td class="px-6 py-3.5">${l.kelas}</td>
+            <td class="px-6 py-3.5"><span class="px-2 py-1 bg-indigo-50 text-indigo-700 rounded text-xs font-bold">${l.jenisAbsen || 'Masuk'}</span></td>
+            <td class="px-6 py-3.5"><span class="px-2.5 py-1 ${l.status === 'Hadir' ? 'bg-emerald-100 text-emerald-800' : l.status === 'Alfa' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'} rounded text-xs font-bold">${l.status}</span></td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function shareRekapToWhatsApp() {
+      const dateFilter = document.getElementById('rekap-date-filter')?.value || getTodayLocalDateStr();
+      const classFilter = document.getElementById('rekap-class-filter')?.value || "ALL";
+      const mapelFilter = document.getElementById('rekap-mapel-filter')?.value || "ALL";
+      const filtered = getFilteredRekapData();
+      const jamInfo = document.getElementById('agenda-jampel')?.value || '-';
+
+      let textMsg = `*REKAP ABSENSI & AGENDA KELAS*\n`;
+      textMsg += `Sekolah: ${schoolProfile.namaSekolah}\n`;
+      textMsg += `Tanggal: ${dateFilter}\n`;
+      textMsg += `Jam Pelajaran: ${jamInfo}\n`;
+      textMsg += `Filter Mapel: ${mapelFilter}\n`;
+      textMsg += `Kelas: ${classFilter}\n`;
+      textMsg += `-----------------------------------\n\n`;
+
+      if (filtered.length === 0) {
+        textMsg += `_Belum ada data absensi tercatat pada filter ini._`;
+      } else {
+        filtered.forEach((l, idx) => {
+          textMsg += `${idx + 1}. *${l.nama}* (${l.peran || 'Siswa'} - ${l.kelas}) - Status: *${l.status}* [${l.jenisAbsen || 'Umum'}]\n`;
+        });
+      }
+
+      const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(textMsg)}`;
+      window.open(waUrl, '_blank');
+    }
+
+    function exportRekapExcel() {
+      const filtered = getFilteredRekapData();
+      if (filtered.length === 0) {
+        showToast("Tidak ada data rekap untuk diekspor!", "error");
+        return;
+      }
+
+      const dataToExport = filtered.map((l, idx) => ({
+        'No': idx + 1,
+        'Waktu / Tanggal': l.timestamp || l.date || '-',
+        'NISN / ID': l.nisn,
+        'Nama': l.nama,
+        'Peran': l.peran || 'Siswa',
+        'Kelas': l.kelas,
+        'Jenis / Sesi': l.jenisAbsen || 'Masuk Sekolah',
+        'Status': l.status,
+        'Judul Materi Pembelajaran': l.materi || '-'
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Rekap Absensi");
+      
+      const dateFilter = document.getElementById('rekap-date-filter')?.value || getTodayLocalDateStr();
+      XLSX.writeFile(workbook, `Rekap_Absensi_${dateFilter}.xlsx`);
+      showToast("Berhasil Mengunduh Rekap Absensi Excel!");
+    }
+
+    /* ============ BELUM ABSEN & AKSI MANUAL ============ */
+    function renderBelumAbsenTable() {
+      const tbody = document.getElementById('belum-table-body');
+      if (!tbody) return;
+
+      const dateFilter = document.getElementById('belum-date-filter')?.value || getTodayLocalDateStr();
+      const nameSearch = document.getElementById('belum-name-search')?.value.toLowerCase().trim() || "";
+      const classFilter = document.getElementById('belum-class-filter')?.value || "ALL";
+
+      let targetSession = "";
+      if (currentUserRole === 'guru') {
+        targetSession = document.getElementById('agenda-mapel')?.value || currentLoggedTeacher?.jabatan || "Pelajaran";
+      } else {
+        targetSession = document.getElementById('belum-session-filter')?.value || "Masuk Sekolah";
+      }
+
+      const roleFilter = currentUserRole === 'admin' ? (document.getElementById('belum-role-filter')?.value || "ALL") : "Siswa";
+
+      let candidateList = [];
+      if (roleFilter === 'ALL' || roleFilter === 'Siswa') {
+        candidateList = candidateList.concat(students.map(s => ({ nisn: s.nisn, nama: s.nama, kelas: s.kelas, peran: 'Siswa' })));
+      }
+      if (roleFilter === 'ALL' || roleFilter === 'Guru') {
+        candidateList = candidateList.concat(teachers.map(g => ({ nisn: g.nip, nama: g.nama, kelas: g.kelas || 'Guru', peran: 'Guru' })));
+      }
+
+      // Saring yang belum absen di tanggal & sesi terkait
+      const filteredBelum = candidateList.filter(cand => {
+        const normCandNisn = String(cand.nisn || '').trim().replace(/^0+/, '');
+        const mName = !nameSearch || cand.nama.toLowerCase().includes(nameSearch) || cand.nisn.includes(nameSearch);
+        
+        let mClass = classFilter === 'ALL' || String(cand.kelas) === classFilter;
+        if (currentUserRole === 'guru' && currentLoggedTeacher && currentLoggedTeacher.kelas !== 'Semua') {
+          mClass = String(cand.kelas) === String(currentLoggedTeacher.kelas);
+        }
+
+        const alreadyAttended = attendanceLogs.some(log => {
+          const logNisnNorm = String(log.nisn || '').trim().replace(/^0+/, '');
+          const logDate = String(log.date || log.timestamp || '').split(' ')[0];
+          const logJenis = String(log.jenisAbsen || '').trim().toLowerCase();
+
+          return logNisnNorm === normCandNisn && logDate === dateFilter && logJenis === targetSession.toLowerCase();
+        });
+
+        return mName && mClass && !alreadyAttended;
+      });
+
+      if (filteredBelum.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-slate-400 font-semibold">Semua siswa/guru sudah melakukan absensi atau tidak ada data.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = filteredBelum.map(item => `
+        <tr class="hover:bg-slate-50 border-b">
+          <td class="px-6 py-3.5 font-mono font-bold">${item.nisn}</td>
+          <td class="px-6 py-3.5 font-bold text-slate-800">${item.nama}</td>
+          <td class="px-6 py-3.5"><span class="px-2 py-0.5 ${item.peran === 'Guru' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'} rounded text-xs font-semibold">${item.peran}</span></td>
+          <td class="px-6 py-3.5">${item.kelas}</td>
+          <td class="px-6 py-3.5 text-center">
+            <div class="flex items-center justify-center space-x-1.5">
+              <button onclick="manualRecordBelum('${item.nisn}', '${item.nama}', '${item.kelas}', 'Hadir', '${item.peran}')" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition">Hadir</button>
+              <button onclick="manualRecordBelum('${item.nisn}', '${item.nama}', '${item.kelas}', 'Izin', '${item.peran}')" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold transition">Izin</button>
+              <button onclick="manualRecordBelum('${item.nisn}', '${item.nama}', '${item.kelas}', 'Sakit', '${item.peran}')" class="px-2.5 py-1 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg text-xs font-bold transition">Sakit</button>
+              <button onclick="manualRecordBelum('${item.nisn}', '${item.nama}', '${item.kelas}', 'Alfa', '${item.peran}')" class="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition">Alfa</button>
+            </div>
           </td>
         </tr>
       `).join('');
     }
 
+    function manualRecordBelum(nisn, nama, kelas, status, peran) {
+      let jenis = "Masuk Sekolah";
+      if (currentUserRole === 'guru') {
+        jenis = document.getElementById('agenda-mapel')?.value || currentLoggedTeacher?.jabatan || "Pelajaran";
+      } else {
+        jenis = document.getElementById('belum-session-filter')?.value || "Masuk Sekolah";
+      }
+      recordAttendanceDirect(nisn, nama, kelas, status, jenis, peran);
+    }
+
+    /* ============ CRUD DATA SISWA ============ */
+    function renderSiswaTable() {
+      const tbody = document.getElementById('siswa-table-body');
+      if (!tbody) return;
+
+      const search = document.getElementById('siswa-search')?.value.toLowerCase().trim() || '';
+      const filterClass = document.getElementById('siswa-class-filter')?.value || 'ALL';
+
+      const filtered = students.filter(s => {
+        const mSearch = !search || String(s.nama).toLowerCase().includes(search) || String(s.nisn).includes(search);
+        const mClass = filterClass === 'ALL' || String(s.kelas) === filterClass;
+        return mSearch && mClass;
+      });
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="p-6 text-center text-slate-400 font-semibold">Tidak ada data siswa ditemukan.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = filtered.map(s => `
+        <tr class="hover:bg-slate-50 border-b">
+          <td class="px-6 py-3"><img src="${s.fotoUrl || DEFAULT_AVATAR_SVG}" class="w-8 h-8 rounded-full object-cover border" onerror="this.src='${DEFAULT_AVATAR_SVG}'"></td>
+          <td class="px-6 py-3 font-mono font-bold">${s.nisn}</td>
+          <td class="px-6 py-3 font-bold text-slate-800">${s.nama}</td>
+          <td class="px-6 py-3">${s.kelas}</td>
+          <td class="px-6 py-3">${s.jk || 'L'}</td>
+          <td class="px-6 py-3">${s.nohp || '-'}</td>
+          <td class="px-6 py-3 text-right space-x-2">
+            <button onclick="editSiswa('${s.nisn}')" class="text-indigo-600 hover:text-indigo-800 text-xs font-bold"><i class="fa-solid fa-pen"></i> Edit</button>
+            <button onclick="deleteSiswa('${s.nisn}')" class="text-rose-600 hover:text-rose-800 text-xs font-bold"><i class="fa-solid fa-trash"></i> Hapus</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function filterSiswaTable() { renderSiswaTable(); }
+
     function openAddSiswaModal() {
       editingSiswaNisn = null;
-      document.getElementById('modal-siswa-title').innerText = "Tambah Siswa Baru";
+      document.getElementById('modal-siswa-title').innerText = 'Tambah Siswa';
       document.getElementById('form-nisn').value = '';
-      document.getElementById('form-nisn').removeAttribute('readonly');
+      document.getElementById('form-nisn').readOnly = false;
       document.getElementById('form-nama').value = '';
       document.getElementById('form-nohp').value = '';
       document.getElementById('modal-siswa').classList.remove('hidden');
     }
 
-    function closeSiswaModal() {
-      document.getElementById('modal-siswa').classList.add('hidden');
-    }
+    function closeSiswaModal() { document.getElementById('modal-siswa').classList.add('hidden'); }
 
     function editSiswa(nisn) {
-      const s = students.find(x => String(x.nisn) === String(nisn));
+      const s = students.find(item => String(item.nisn) === String(nisn));
       if (!s) return;
       editingSiswaNisn = s.nisn;
-      document.getElementById('modal-siswa-title').innerText = "Edit Data Siswa";
+      document.getElementById('modal-siswa-title').innerText = 'Edit Data Siswa';
       document.getElementById('form-nisn').value = s.nisn;
-      document.getElementById('form-nisn').setAttribute('readonly', 'true');
+      document.getElementById('form-nisn').readOnly = true;
       document.getElementById('form-nama').value = s.nama;
       document.getElementById('form-kelas').value = s.kelas;
       document.getElementById('form-jk').value = s.jk || 'L';
@@ -1902,111 +2093,73 @@
       const jk = document.getElementById('form-jk').value;
       const nohp = document.getElementById('form-nohp').value.trim();
 
-      const payload = { nisn, nama, kelas, jk, nohp, action: editingSiswaNisn ? 'update' : 'create' };
+      const siswaData = { nisn, nama, kelas, jk, nohp, fotoUrl: '' };
 
       if (editingSiswaNisn) {
-        const idx = students.findIndex(x => String(x.nisn) === String(editingSiswaNisn));
-        if (idx !== -1) students[idx] = { ...students[idx], nama, kelas, jk, nohp };
+        const idx = students.findIndex(s => String(s.nisn) === String(editingSiswaNisn));
+        if (idx !== -1) students[idx] = { ...students[idx], ...siswaData };
       } else {
-        students.push({ nisn, nama, kelas, jk, nohp, fotoUrl: '' });
+        students.push(siswaData);
       }
 
-      callGasBackend('saveSiswa', payload, () => {
-        showToast("Data siswa berhasil disimpan");
-        closeSiswaModal();
-        renderSiswaTable();
-      });
+      callGasBackend('saveSiswa', siswaData);
+      closeSiswaModal();
+      renderSiswaTable();
+      showToast("Data siswa berhasil disimpan!");
     }
 
     function deleteSiswa(nisn) {
-      if (!confirm(`Hapus data siswa dengan NISN ${nisn}?`)) return;
+      if (!confirm(`Yakin ingin menghapus siswa NISN ${nisn}?`)) return;
       students = students.filter(s => String(s.nisn) !== String(nisn));
-      callGasBackend('deleteSiswa', { nisn }, () => {
-        showToast("Siswa berhasil dihapus");
-        renderSiswaTable();
-      });
+      callGasBackend('deleteSiswa', { nisn: nisn });
+      renderSiswaTable();
+      showToast("Data siswa berhasil dihapus!");
     }
 
-    function downloadExcelTemplate(type) {
-      const data = type === 'siswa' 
-        ? [["NISN", "Nama Lengkap", "Kelas", "JK", "No HP"], ["1234567890", "Contoh Siswa", classList[0] || "X IPA 1", "L", "08123456789"]]
-        : [["NIP", "Nama Guru", "Username", "Password", "Mapel", "Kelas", "JK", "No HP"], ["198001012005011001", "Contoh Guru S.Pd", "guru1", "123456", "Matematika", "Semua", "L", "08123456789"]];
-      
-      const ws = XLSX.utils.aoa_to_sheet(data);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Template");
-      XLSX.writeFile(wb, `Template_Import_${type}.xlsx`);
-    }
-
-    function importExcelData(event, type) {
-      const file = event.target.files[0];
-      if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const json = XLSX.utils.sheet_to_json(sheet);
-
-        if (json.length === 0) {
-          showToast("File Excel kosong", "error");
-          return;
-        }
-
-        callGasBackend('importData', { type, data: json }, () => {
-          showToast(`Berhasil mengimpor ${json.length} data ${type}`);
-          syncDataRealtime();
-        });
-      };
-      reader.readAsArrayBuffer(file);
-    }
-
-    /* ============ KELOLA DATA GURU ============ */
+    /* ============ CRUD DATA GURU ============ */
     function renderGuruTable() {
-      filterGuruTable();
-    }
+      const tbody = document.getElementById('guru-table-body');
+      if (!tbody) return;
 
-    function filterGuruTable() {
-      const q = document.getElementById('guru-search')?.value.toLowerCase().trim() || '';
-      const tb = document.getElementById('guru-table-body');
-      if (!tb) return;
+      const search = document.getElementById('guru-search')?.value.toLowerCase().trim() || '';
 
-      const filtered = teachers.filter(t => {
-        return String(t.nip).toLowerCase().includes(q) || String(t.nama).toLowerCase().includes(q) || String(t.jabatan).toLowerCase().includes(q);
+      const filtered = teachers.filter(g => {
+        return !search || String(g.nama).toLowerCase().includes(search) || String(g.nip).includes(search);
       });
 
       if (filtered.length === 0) {
-        tb.innerHTML = `<tr><td colspan="6" class="px-6 py-6 text-center text-slate-400 text-xs">Data guru tidak ditemukan.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-slate-400 font-semibold">Tidak ada data guru ditemukan.</td></tr>`;
         return;
       }
 
-      tb.innerHTML = filtered.map(t => `
-        <tr class="hover:bg-slate-50 border-b border-slate-100">
-          <td class="px-6 py-3"><img src="${t.fotoUrl || DEFAULT_AVATAR_SVG}" class="w-8 h-8 rounded-full object-cover border" onerror="this.src='${DEFAULT_AVATAR_SVG}'"></td>
-          <td class="px-6 py-3 font-mono text-xs">
-            <span class="font-bold text-slate-800">${t.nip}</span><br>
-            <span class="text-[10px] text-indigo-600 font-semibold">User: ${t.username || t.nip} | Pass: ${t.password || '123456'}</span>
+      tbody.innerHTML = filtered.map(g => `
+        <tr class="hover:bg-slate-50 border-b">
+          <td class="px-6 py-3"><img src="${g.fotoUrl || DEFAULT_AVATAR_SVG}" class="w-8 h-8 rounded-full object-cover border" onerror="this.src='${DEFAULT_AVATAR_SVG}'"></td>
+          <td class="px-6 py-3">
+            <div class="font-mono font-bold">${g.nip}</div>
+            <div class="text-[11px] text-slate-400">User: ${g.username} | Pass: ${g.password}</div>
           </td>
-          <td class="px-6 py-3 font-bold text-slate-800 text-xs">${t.nama}</td>
-          <td class="px-6 py-3 text-xs">
-            <span class="font-bold text-indigo-700">${t.jabatan || 'Pengajar'}</span><br>
-            <span class="text-[10px] text-slate-500">Kelas: ${t.kelas || 'Semua'}</span>
+          <td class="px-6 py-3 font-bold text-slate-800">${g.nama}</td>
+          <td class="px-6 py-3">
+            <span class="px-2 py-0.5 bg-amber-50 text-amber-700 rounded text-xs font-bold">${g.jabatan || 'Pengajar'}</span>
+            <div class="text-xs text-slate-500 mt-0.5">Kelas: ${g.kelas || 'Semua'}</div>
           </td>
-          <td class="px-6 py-3 text-xs">${t.nohp || '-'}</td>
-          <td class="px-6 py-3 text-right text-xs space-x-1">
-            <button onclick="editGuru('${t.nip}')" class="px-2 py-1 bg-amber-50 text-amber-600 rounded-md font-bold hover:bg-amber-100"><i class="fa-solid fa-pen-to-square"></i></button>
-            <button onclick="deleteGuru('${t.nip}')" class="px-2 py-1 bg-rose-50 text-rose-600 rounded-md font-bold hover:bg-rose-100"><i class="fa-solid fa-trash"></i></button>
+          <td class="px-6 py-3">${g.nohp || '-'}</td>
+          <td class="px-6 py-3 text-right space-x-2">
+            <button onclick="editGuru('${g.nip}')" class="text-indigo-600 hover:text-indigo-800 text-xs font-bold"><i class="fa-solid fa-pen"></i> Edit</button>
+            <button onclick="deleteGuru('${g.nip}')" class="text-rose-600 hover:text-rose-800 text-xs font-bold"><i class="fa-solid fa-trash"></i> Hapus</button>
           </td>
         </tr>
       `).join('');
     }
 
+    function filterGuruTable() { renderGuruTable(); }
+
     function openAddGuruModal() {
       editingGuruNip = null;
-      document.getElementById('modal-guru-title').innerText = "Tambah Guru & Tugas Mengajar";
+      document.getElementById('modal-guru-title').innerText = 'Tambah Guru & Penugasan';
       document.getElementById('form-guru-nip').value = '';
-      document.getElementById('form-guru-nip').removeAttribute('readonly');
+      document.getElementById('form-guru-nip').readOnly = false;
       document.getElementById('form-guru-nama').value = '';
       document.getElementById('form-guru-user').value = '';
       document.getElementById('form-guru-pass').value = '123456';
@@ -2015,17 +2168,15 @@
       document.getElementById('modal-guru').classList.remove('hidden');
     }
 
-    function closeGuruModal() {
-      document.getElementById('modal-guru').classList.add('hidden');
-    }
+    function closeGuruModal() { document.getElementById('modal-guru').classList.add('hidden'); }
 
     function editGuru(nip) {
-      const g = teachers.find(x => String(x.nip) === String(nip));
+      const g = teachers.find(item => String(item.nip) === String(nip));
       if (!g) return;
       editingGuruNip = g.nip;
-      document.getElementById('modal-guru-title').innerText = "Edit Data Guru";
+      document.getElementById('modal-guru-title').innerText = 'Edit Data Guru & Penugasan';
       document.getElementById('form-guru-nip').value = g.nip;
-      document.getElementById('form-guru-nip').setAttribute('readonly', 'true');
+      document.getElementById('form-guru-nip').readOnly = true;
       document.getElementById('form-guru-nama').value = g.nama;
       document.getElementById('form-guru-user').value = g.username || g.nip;
       document.getElementById('form-guru-pass').value = g.password || '123456';
@@ -2040,55 +2191,53 @@
       e.preventDefault();
       const nip = document.getElementById('form-guru-nip').value.trim();
       const nama = document.getElementById('form-guru-nama').value.trim();
-      const username = document.getElementById('form-guru-user').value.trim() || nip;
-      const password = document.getElementById('form-guru-pass').value.trim() || '123456';
-      const mapel = document.getElementById('form-guru-mapel').value.trim();
+      const username = document.getElementById('form-guru-user').value.trim();
+      const password = document.getElementById('form-guru-pass').value.trim();
+      const jabatan = document.getElementById('form-guru-mapel').value.trim();
       const jk = document.getElementById('form-guru-jk').value;
       const kelas = document.getElementById('form-guru-kelas').value;
       const nohp = document.getElementById('form-guru-nohp').value.trim();
 
-      const payload = { nip, nama, username, password, jabatan: mapel, jk, kelas, nohp, action: editingGuruNip ? 'update' : 'create' };
+      const guruData = { nip, nama, username, password, jabatan, jk, kelas, nohp, fotoUrl: '' };
 
       if (editingGuruNip) {
-        const idx = teachers.findIndex(x => String(x.nip) === String(editingGuruNip));
-        if (idx !== -1) teachers[idx] = { ...teachers[idx], nama, username, password, jabatan: mapel, jk, kelas, nohp };
+        const idx = teachers.findIndex(g => String(g.nip) === String(editingGuruNip));
+        if (idx !== -1) teachers[idx] = { ...teachers[idx], ...guruData };
       } else {
-        teachers.push({ nip, nama, username, password, jabatan: mapel, jk, kelas, nohp, fotoUrl: '' });
+        teachers.push(guruData);
       }
 
-      callGasBackend('saveGuru', payload, () => {
-        showToast("Data guru berhasil disimpan");
-        closeGuruModal();
-        renderGuruTable();
-        updateAllDropdowns();
-      });
+      callGasBackend('saveGuru', guruData);
+      closeGuruModal();
+      renderGuruTable();
+      updateMapelDropdowns();
+      showToast("Data guru berhasil disimpan!");
     }
 
     function deleteGuru(nip) {
-      if (!confirm(`Hapus data guru dengan NIP ${nip}?`)) return;
-      teachers = teachers.filter(t => String(t.nip) !== String(nip));
-      callGasBackend('deleteGuru', { nip }, () => {
-        showToast("Data guru berhasil dihapus");
-        renderGuruTable();
-        updateAllDropdowns();
-      });
+      if (!confirm(`Yakin ingin menghapus guru NIP ${nip}?`)) return;
+      teachers = teachers.filter(g => String(g.nip) !== String(nip));
+      callGasBackend('deleteGuru', { nip: nip });
+      renderGuruTable();
+      updateMapelDropdowns();
+      showToast("Data guru berhasil dihapus!");
     }
 
-    /* ============ KELOLA KELAS ============ */
+    /* ============ KELOLA KELAS & PROFIL ============ */
     function renderKelasTable() {
-      const tb = document.getElementById('kelas-table-body');
-      if (!tb) return;
+      const tbody = document.getElementById('kelas-table-body');
+      if (!tbody) return;
 
       if (classList.length === 0) {
-        tb.innerHTML = `<tr><td colspan="2" class="px-6 py-4 text-center text-slate-400 text-xs">Belum ada kelas.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="2" class="p-6 text-center text-slate-400 font-semibold">Belum ada kelas terdaftar.</td></tr>`;
         return;
       }
 
-      tb.innerHTML = classList.map(k => `
-        <tr class="hover:bg-slate-50 border-b border-slate-100">
-          <td class="px-6 py-3.5 font-bold text-slate-800 text-xs">${k}</td>
+      tbody.innerHTML = classList.map(k => `
+        <tr class="hover:bg-slate-50 border-b">
+          <td class="px-6 py-3.5 font-bold text-slate-800">${k}</td>
           <td class="px-6 py-3.5 text-right">
-            <button onclick="deleteKelas('${k}')" class="px-2.5 py-1 bg-rose-50 text-rose-600 rounded-lg font-bold text-xs hover:bg-rose-100"><i class="fa-solid fa-trash mr-1"></i>Hapus</button>
+            <button onclick="deleteKelas('${k}')" class="text-rose-600 hover:text-rose-800 text-xs font-bold"><i class="fa-solid fa-trash mr-1"></i> Hapus</button>
           </td>
         </tr>
       `).join('');
@@ -2096,224 +2245,31 @@
 
     function handleSaveKelas(e) {
       e.preventDefault();
-      const input = document.getElementById('input-nama-kelas');
-      const namaKelas = input.value.trim();
+      const nama = document.getElementById('input-nama-kelas').value.trim();
+      if (!nama) return;
 
-      if (!namaKelas) return;
-      if (classList.includes(namaKelas)) {
-        showToast("Nama kelas sudah ada!", "error");
+      if (classList.includes(nama)) {
+        showToast("Kelas sudah ada!", "error");
         return;
       }
 
-      classList.push(namaKelas);
-      input.value = '';
-      callGasBackend('saveKelas', { nama: namaKelas }, () => {
-        showToast("Kelas berhasil ditambahkan");
-        updateAllDropdowns();
-        renderKelasTable();
-      });
+      classList.push(nama);
+      callGasBackend('saveKelas', { nama: nama });
+      document.getElementById('input-nama-kelas').value = '';
+      updateAllDropdowns();
+      renderKelasTable();
+      showToast("Kelas berhasil ditambahkan!");
     }
 
-    function deleteKelas(namaKelas) {
-      if (!confirm(`Hapus kelas "${namaKelas}"?`)) return;
-      classList = classList.filter(k => k !== namaKelas);
-      callGasBackend('deleteKelas', { nama: namaKelas }, () => {
-        showToast("Kelas berhasil dihapus");
-        updateAllDropdowns();
-        renderKelasTable();
-      });
+    function deleteKelas(nama) {
+      if (!confirm(`Yakin ingin menghapus kelas ${nama}?`)) return;
+      classList = classList.filter(k => k !== nama);
+      callGasBackend('deleteKelas', { nama: nama });
+      updateAllDropdowns();
+      renderKelasTable();
+      showToast("Kelas berhasil dihapus!");
     }
 
-    /* ============ REKAP ABSENSI ============ */
-    function renderRekapTable() {
-      const dateVal = document.getElementById('rekap-date-filter')?.value;
-      const nameVal = document.getElementById('rekap-name-search')?.value.toLowerCase().trim() || '';
-      const classVal = document.getElementById('rekap-class-filter')?.value || 'ALL';
-      const mapelVal = document.getElementById('rekap-mapel-filter')?.value || 'ALL';
-      const roleVal = document.getElementById('rekap-role-filter')?.value || 'ALL';
-      const sessionVal = document.getElementById('rekap-session-filter')?.value || 'ALL';
-      const tb = document.getElementById('rekap-table-body');
-      if (!tb) return;
-
-      let filtered = attendanceLogs.filter(l => {
-        const logDate = String(l.date || l.timestamp || '').split(' ')[0];
-        const matchDate = !dateVal || logDate === dateVal;
-        const matchName = !nameVal || String(l.nama).toLowerCase().includes(nameVal) || String(l.nisn).toLowerCase().includes(nameVal);
-        const matchClass = classVal === 'ALL' || l.kelas === classVal;
-        const matchRole = roleVal === 'ALL' || l.peran === roleVal;
-        const matchSession = sessionVal === 'ALL' || l.jenisAbsen === sessionVal;
-        const matchMapel = mapelVal === 'ALL' || l.jenisAbsen === mapelVal;
-
-        return matchDate && matchName && matchClass && matchRole && matchSession && matchMapel;
-      });
-
-      if (filtered.length === 0) {
-        tb.innerHTML = `<tr><td colspan="7" class="px-6 py-6 text-center text-slate-400 text-xs">Data rekap absensi tidak ditemukan.</td></tr>`;
-        return;
-      }
-
-      tb.innerHTML = filtered.map(l => `
-        <tr class="hover:bg-slate-50 border-b border-slate-100">
-          <td class="px-6 py-3.5 text-xs text-slate-500 font-medium">${l.time || l.timestamp || '-'}</td>
-          <td class="px-6 py-3.5 font-mono font-bold text-xs">${l.nisn}</td>
-          <td class="px-6 py-3.5 font-bold text-slate-800 text-xs">${l.nama}</td>
-          <td class="px-6 py-3.5 text-xs"><span class="px-2 py-0.5 bg-slate-100 text-slate-600 rounded text-[11px] font-semibold">${l.peran || 'Siswa'}</span></td>
-          <td class="px-6 py-3.5 text-xs font-semibold">${l.kelas || '-'}</td>
-          <td class="px-6 py-3.5 text-xs"><span class="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded text-[11px] font-semibold">${l.jenisAbsen || 'Masuk'}</span></td>
-          <td class="px-6 py-3.5 text-xs"><span class="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[11px] font-bold">${l.status}</span></td>
-        </tr>
-      `).join('');
-    }
-
-    function shareRekapToWhatsApp() {
-  try {
-    const dateFilter = document.getElementById('rekap-date-filter')?.value || 
-                       (typeof getTodayLocalDateStr === 'function' ? getTodayLocalDateStr() : new Date().toISOString().split('T')[0]);
-                       
-    const classFilter = document.getElementById('rekap-class-filter')?.value || "ALL";
-    const mapelFilter = document.getElementById('rekap-mapel-filter')?.value || "ALL";
-    const jamInfo = document.getElementById('agenda-jampel')?.value || '-';
-    
-    const namaSekolah = (typeof schoolProfile !== 'undefined' && schoolProfile?.namaSekolah) 
-                        ? schoolProfile.namaSekolah 
-                        : 'Sekolah';
-
-    // 1. Ambil data awal
-    let filtered = [];
-    if (typeof getFilteredRekapData === 'function') {
-      filtered = getFilteredRekapData() || [];
-    } else if (typeof attendanceLogs !== 'undefined' && Array.isArray(attendanceLogs)) {
-      filtered = attendanceLogs.filter(l => String(l.date || l.timestamp || '').startsWith(dateFilter));
-    }
-
-    // 2. FILTER TAMBAHAN: Saring data berdasarkan Mapel jika filter tidak "ALL"
-    if (mapelFilter !== "ALL") {
-      filtered = filtered.filter(l => {
-        const jenis = String(l.jenisAbsen || '').toLowerCase().trim();
-        const targetMapel = mapelFilter.toLowerCase().trim();
-        return jenis === targetMapel;
-      });
-    }
-
-    // 3. Susun pesan teks WhatsApp
-    let textMsg = `*REKAP ABSENSI & AGENDA KELAS*\n`;
-    textMsg += `Sekolah: ${namaSekolah}\n`;
-    textMsg += `Tanggal: ${dateFilter}\n`;
-    textMsg += `Jam Pelajaran: ${jamInfo}\n`;
-    textMsg += `Filter Mapel: ${mapelFilter}\n`;
-    textMsg += `Kelas: ${classFilter}\n`;
-    textMsg += `-----------------------------------\n\n`;
-
-    if (filtered.length === 0) {
-      textMsg += `_Belum ada data absensi tercatat pada filter ini._`;
-    } else {
-      filtered.forEach((l, idx) => {
-        const peran = l.peran || 'Siswa';
-        const kelas = l.kelas || (classFilter !== 'ALL' ? classFilter : '-');
-        const jenisAbsen = l.jenisAbsen || mapelFilter;
-        
-        textMsg += `${idx + 1}. ${l.nama} (${peran} - ${kelas}) - Status: *${l.status}* [${jenisAbsen}]\n`;
-      });
-    }
-
-    // 4. Buka WhatsApp
-    const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(textMsg)}`;
-    window.open(waUrl, '_blank');
-
-  } catch (error) {
-    console.error("Gagal mengirim ke WhatsApp:", error);
-    alert("Terjadi kesalahan saat memproses data ke WhatsApp.");
-  }
-}
-    function exportRekapExcel() {
-      if (attendanceLogs.length === 0) {
-        showToast("Tidak ada data untuk diekspor", "error");
-        return;
-      }
-      const ws = XLSX.utils.json_to_sheet(attendanceLogs);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Rekap Absensi");
-      XLSX.writeFile(wb, `Rekap_Absensi_${getTodayLocalDateStr()}.xlsx`);
-    }
-
-    /* ============ BELUM ABSEN & AKSI MANUAL ============ */
-    function renderBelumAbsenTable() {
-      const dateVal = document.getElementById('belum-date-filter')?.value || getTodayLocalDateStr();
-      const nameVal = document.getElementById('belum-name-search')?.value.toLowerCase().trim() || '';
-      const classVal = document.getElementById('belum-class-filter')?.value || 'ALL';
-      const roleVal = currentUserRole === 'guru' ? 'Siswa' : (document.getElementById('belum-role-filter')?.value || 'ALL');
-      const sessionVal = currentUserRole === 'guru' 
-        ? (document.getElementById('belum-mapel-filter')?.value || 'Pelajaran')
-        : (document.getElementById('belum-session-filter')?.value || 'Masuk Sekolah');
-
-      const tb = document.getElementById('belum-table-body');
-      if (!tb) return;
-
-      const presentNisns = new Set(
-        attendanceLogs
-          .filter(l => String(l.date || l.timestamp || '').startsWith(dateVal) && l.jenisAbsen === sessionVal)
-          .map(l => String(l.nisn).trim())
-      );
-
-      let unabsentList = [];
-
-      if (roleVal === 'ALL' || roleVal === 'Siswa') {
-        students.forEach(s => {
-          if (!presentNisns.has(String(s.nisn).trim())) {
-            unabsentList.push({ id: s.nisn, nama: s.nama, kelas: s.kelas, peran: 'Siswa' });
-          }
-        });
-      }
-
-      if (roleVal === 'ALL' || roleVal === 'Guru') {
-        teachers.forEach(g => {
-          if (!presentNisns.has(String(g.nip).trim())) {
-            unabsentList.push({ id: g.nip, nama: g.nama, kelas: 'Guru/Staf', peran: 'Guru' });
-          }
-        });
-      }
-
-      let filtered = unabsentList.filter(item => {
-        const matchName = !nameVal || item.nama.toLowerCase().includes(nameVal) || item.id.toLowerCase().includes(nameVal);
-        const matchClass = classVal === 'ALL' || item.kelas === classVal;
-        return matchName && matchClass;
-      });
-
-      if (filtered.length === 0) {
-        tb.innerHTML = `<tr><td colspan="5" class="px-6 py-6 text-center text-slate-400 text-xs">Semua pengguna sudah absen untuk sesi ini! 🎉</td></tr>`;
-        return;
-      }
-
-      tb.innerHTML = filtered.map(item => `
-        <tr class="hover:bg-slate-50 border-b border-slate-100">
-          <td class="px-6 py-3 font-mono font-bold text-xs">${item.id}</td>
-          <td class="px-6 py-3 font-bold text-slate-800 text-xs">${item.nama}</td>
-          <td class="px-6 py-3 text-xs"><span class="px-2 py-0.5 bg-slate-100 text-slate-600 rounded text-[11px] font-semibold">${item.peran}</span></td>
-          <td class="px-6 py-3 text-xs font-semibold">${item.kelas}</td>
-          <td class="px-6 py-3 text-center space-x-1">
-            <button onclick="manualSetAbsen('${item.id}', 'Hadir', '${sessionVal}')" class="px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-lg font-bold text-xs hover:bg-emerald-100">Hadir</button>
-            <button onclick="manualSetAbsen('${item.id}', 'Izin', '${sessionVal}')" class="px-2.5 py-1 bg-amber-50 text-amber-700 rounded-lg font-bold text-xs hover:bg-amber-100">Izin</button>
-            <button onclick="manualSetAbsen('${item.id}', 'Sakit', '${sessionVal}')" class="px-2.5 py-1 bg-sky-50 text-sky-700 rounded-lg font-bold text-xs hover:bg-sky-100">Sakit</button>
-            <button onclick="manualSetAbsen('${item.id}', 'Alfa', '${sessionVal}')" class="px-2.5 py-1 bg-rose-50 text-rose-700 rounded-lg font-bold text-xs hover:bg-rose-100">Alfa</button>
-          </td>
-        </tr>
-      `).join('');
-    }
-
-    function manualSetAbsen(id, status, jenis) {
-      const student = students.find(s => String(s.nisn).trim() === String(id).trim());
-      if (student) {
-        recordAttendanceDirect(student.nisn, student.nama, student.kelas, status, jenis, 'Siswa');
-        return;
-      }
-
-      const teacher = teachers.find(t => String(t.nip).trim() === String(id).trim());
-      if (teacher) {
-        recordAttendanceDirect(teacher.nip, teacher.nama, 'Guru/Staf', status, jenis, 'Guru');
-      }
-    }
-
-    /* ============ PROFIL SEKOLAH ============ */
     function saveSchoolProfileForm(e) {
       e.preventDefault();
       schoolProfile.namaSekolah = document.getElementById('profil-nama-sekolah').value.trim();
@@ -2321,10 +2277,58 @@
       schoolProfile.alamat = document.getElementById('profil-alamat').value.trim();
       schoolProfile.logoUrl = document.getElementById('profil-logo-url').value.trim();
 
+      callGasBackend('savePengaturan', schoolProfile);
       applySchoolProfileUI();
-      callGasBackend('savePengaturan', schoolProfile, () => {
-        showToast("Profil sekolah berhasil diperbarui");
-      });
+      showToast("Profil sekolah berhasil disimpan!");
+    }
+
+    /* ============ TEMPLATE & IMPORT EXCEL ============ */
+    function downloadExcelTemplate(type) {
+      let data = [];
+      if (type === 'siswa') {
+        data = [
+          { NISN: '1234567890', Nama: 'Budi Santoso', Kelas: 'X IPA 1', JK: 'L', NoHP: '08123456789' }
+        ];
+      }
+      const ws = XLSX.utils.json_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Template");
+      XLSX.writeFile(wb, `Template_Import_${type}.xlsx`);
+    }
+
+    function importExcelData(e, type) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function (evt) {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const json = XLSX.utils.sheet_to_json(worksheet);
+
+        if (type === 'siswa') {
+          json.forEach(row => {
+            const nisn = String(row.NISN || row.nisn || '').trim();
+            const nama = String(row.Nama || row.nama || '').trim();
+            const kelas = String(row.Kelas || row.kelas || 'X IPA 1').trim();
+            const jk = String(row.JK || row.jk || 'L').trim();
+            const nohp = String(row.NoHP || row.nohp || '').trim();
+
+            if (nisn && nama) {
+              const siswaObj = { nisn, nama, kelas, jk, nohp, fotoUrl: '' };
+              const existingIdx = students.findIndex(s => String(s.nisn) === nisn);
+              if (existingIdx !== -1) students[existingIdx] = siswaObj;
+              else students.push(siswaObj);
+              callGasBackend('saveSiswa', siswaObj);
+            }
+          });
+          renderSiswaTable();
+          showToast("Berhasil mengimpor data siswa!");
+        }
+      };
+      reader.readAsArrayBuffer(file);
     }
   </script>
 </body>
