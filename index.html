@@ -15,8 +15,8 @@
     * { font-family: 'Plus Jakarta Sans', sans-serif; box-sizing: border-box; }
     
     .kts-card {
-      width: 216px;
-      height: 340px;
+      width: 54mm;
+      height: 85mm;
       background-color: #ffffff;
       border-radius: 12px;
       overflow: hidden;
@@ -153,18 +153,29 @@
       font-weight: 600;
     }
 
+    @page {
+      size: A4 portrait;
+      margin: 13mm 16mm;
+    }
     @media print {
+      html, body {
+        margin: 0 !important;
+        padding: 0 !important;
+      }
       body * { visibility: hidden; }
       #print-section, #print-section * { visibility: visible; }
       #print-section {
-        position: absolute;
-        left: 0;
-        top: 0;
-        width: 100%;
+        position: static !important;
         display: grid !important;
-        grid-template-columns: repeat(3, 1fr) !important;
+        grid-template-columns: repeat(3, 54mm) !important;
+        grid-auto-rows: 85mm !important;
         gap: 8mm !important;
-        padding: 5mm !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        width: auto !important;
+        height: auto !important;
+        justify-content: start !important;
+        align-content: start !important;
       }
       .kts-card {
         page-break-inside: avoid;
@@ -173,6 +184,9 @@
         border: 1px solid #cbd5e1 !important;
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
+        width: 54mm !important;
+        height: 85mm !important;
+        margin: 0 !important;
       }
       .no-print { display: none !important; }
     }
@@ -783,6 +797,36 @@
     let pieChartInstance = null;
     let editingSiswaNisn = null, editingGuruNip = null;
 
+    // ==== FUNGSI PENYIMPANAN SESI LOGIN (localStorage) ====
+    function saveSessionToStorage() {
+      try {
+        const sessionData = {
+          currentUserRole: currentUserRole,
+          currentLoggedTeacher: currentLoggedTeacher,
+          savedAt: new Date().toISOString()
+        };
+        localStorage.setItem('absensi_session', JSON.stringify(sessionData));
+      } catch (e) {
+        console.warn("Gagal menyimpan sesi:", e);
+      }
+    }
+
+    function restoreSessionFromStorage() {
+      try {
+        const stored = localStorage.getItem('absensi_session');
+        if (!stored) return null;
+        return JSON.parse(stored);
+      } catch (e) {
+        localStorage.removeItem('absensi_session');
+        return null;
+      }
+    }
+
+    function clearSessionFromStorage() {
+      localStorage.removeItem('absensi_session');
+    }
+    // ==== AKHIR FUNGSI SESI ====
+
     const adminNavItems = [
       { id:'dashboard', label:'Dashboard', icon:'fa-gauge-high' },
       { id:'scan', label:'Scan QR Umum', icon:'fa-camera' },
@@ -908,6 +952,26 @@
       if (todayDateFilter) todayDateFilter.value = getTodayLocalDateStr();
       const todayBelumFilter = document.getElementById('belum-date-filter');
       if (todayBelumFilter) todayBelumFilter.value = getTodayLocalDateStr();
+
+      // ==== PULIHKAN SESI LOGIN OTOMATIS SAAT HALAMAN DIMUAT / REFRESH ====
+      const savedSession = restoreSessionFromStorage();
+      if (savedSession && savedSession.currentUserRole) {
+        currentUserRole = savedSession.currentUserRole;
+        currentLoggedTeacher = savedSession.currentLoggedTeacher;
+
+        // Sembunyikan layar login & muat tampilan sesuai peran
+        document.getElementById('auth-screen').classList.add('hidden');
+        updateRoleBasedVisibility();
+        renderNavMenu();
+
+        if (currentUserRole === 'admin') {
+          switchView('dashboard');
+        } else if (currentUserRole === 'guru') {
+          setupTeacherAgendaView();
+          switchView('agenda');
+        }
+      }
+      // ==== AKHIR PEMULIHAN SESI ====
 
       callGasBackend('getInitialData');
     }
@@ -1115,6 +1179,9 @@
         document.getElementById('admin-user').value = '';
         document.getElementById('admin-pass').value = '';
 
+        // Simpan sesi ke penyimpanan lokal agar bertahan saat refresh
+        saveSessionToStorage();
+
         document.getElementById('auth-screen').classList.add('hidden');
         updateRoleBasedVisibility();
         renderNavMenu();
@@ -1137,6 +1204,9 @@
         
         document.getElementById('guru-user').value = '';
         document.getElementById('guru-pass').value = '';
+
+        // Simpan sesi ke penyimpanan lokal agar bertahan saat refresh
+        saveSessionToStorage();
 
         document.getElementById('auth-screen').classList.add('hidden');
         updateRoleBasedVisibility();
@@ -1177,6 +1247,10 @@
       currentLoggedTeacher = null;
       if (isCameraActive) stopCamera();
       if (isAgendaCamActive) stopCameraAgenda();
+      
+      // Hapus sesi dari penyimpanan lokal saat logout
+      clearSessionFromStorage();
+      
       document.getElementById('auth-screen').classList.remove('hidden');
     }
 
