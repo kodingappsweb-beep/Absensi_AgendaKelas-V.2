@@ -439,6 +439,9 @@
                 <div><h3 class="font-bold text-slate-800 text-lg flex items-center gap-2"><i class="fa-solid fa-camera text-indigo-600"></i><span>Scanner Kamera QR</span></h3><p class="text-xs text-slate-500">Arahkan QR Code Kartu ke kotak kamera</p></div>
                 <div class="flex items-center space-x-2 w-full sm:w-auto">
                   <select id="camera-select" onchange="switchCameraDevice()" class="hidden px-2 py-1.5 bg-slate-100 border rounded-lg text-xs font-semibold"></select>
+                  <button id="btn-switch-camera" onclick="toggleCameraFacing()" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all border border-slate-200" title="Ganti kamera depan/belakang">
+                    <i class="fa-solid fa-camera-rotate mr-1"></i><span id="camera-facing-btn-text">Kamera Depan</span>
+                  </button>
                   <button id="btn-toggle-camera" onclick="toggleCamera()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-md"><i class="fa-solid fa-power-off mr-1"></i><span id="camera-btn-text">Nyalakan Kamera</span></button>
                 </div>
               </div>
@@ -775,6 +778,7 @@
     let currentScanMode = 'Hadir', currentJenisAbsen = 'Masuk Sekolah';
     let html5QrScanner = null, html5QrAgenda = null, isCameraActive = false, isAgendaCamActive = false;
     let selectedCameraId = null, selectedAgendaCameraId = null;
+    let generalCameraDevices = [], generalCameraFacing = 'environment';
     let currentActiveView = 'dashboard';
     let pieChartInstance = null;
     let editingSiswaNisn = null, editingGuruNip = null;
@@ -1280,10 +1284,46 @@
       const selectElem = document.getElementById('camera-select');
       if (selectElem) {
         selectedCameraId = selectElem.value;
+        const selectedDevice = generalCameraDevices.find(d => String(d.id) === String(selectedCameraId));
+        if (selectedDevice) {
+          const label = String(selectedDevice.label || '').toLowerCase();
+          generalCameraFacing = /front|user|depan|facetime/.test(label) ? 'user' : 'environment';
+        }
         if (isCameraActive) {
           await stopCamera();
           await startCamera();
         }
+      }
+    }
+
+    function findGeneralCameraByFacing(facing) {
+      const devices = Array.isArray(generalCameraDevices) ? generalCameraDevices : [];
+      if (!devices.length) return null;
+
+      const keywords = facing === 'user'
+        ? ['front', 'user', 'depan', 'facetime']
+        : ['back', 'rear', 'environment', 'belakang'];
+
+      return devices.find(d => {
+        const label = String(d.label || '').toLowerCase();
+        return keywords.some(keyword => label.includes(keyword));
+      }) || null;
+    }
+
+    async function toggleCameraFacing() {
+      generalCameraFacing = generalCameraFacing === 'environment' ? 'user' : 'environment';
+      selectedCameraId = null;
+
+      const facingText = document.getElementById('camera-facing-btn-text');
+      if (facingText) {
+        facingText.innerText = generalCameraFacing === 'user' ? 'Kamera Belakang' : 'Kamera Depan';
+      }
+
+      if (isCameraActive) {
+        await stopCamera();
+        await startCamera();
+      } else {
+        await startCamera();
       }
     }
 
@@ -1376,6 +1416,73 @@
       if (val) { processAgendaScan(val); document.getElementById('agenda-manual-nisn').value = ''; }
     }
 
+    function setGeneralScanResult(type, nama = '', status = '', detail = '') {
+      const resEl = document.getElementById('scan-result-card');
+      if (!resEl) return;
+
+      const safe = (value) => String(value || '').replace(/[<>&"]/g, char => ({
+        '<':'&lt;', '>':'&gt;', '&':'&amp;', '"':'&quot;'
+      }[char]));
+
+      if (type === 'waiting') {
+        resEl.innerHTML = `
+          <div class="w-16 h-16 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center text-2xl mb-3">
+            <i class="fa-solid fa-id-badge"></i>
+          </div>
+          <h4 class="font-bold text-slate-700 text-base">Menunggu Pemindaian</h4>
+          <p class="text-xs text-slate-400 mt-1">Siswa/Guru yang discan akan otomatis divalidasi</p>`;
+        return;
+      }
+
+      if (type === 'processing') {
+        resEl.innerHTML = `
+          <div class="w-16 h-16 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center text-2xl mb-3">
+            <i class="fa-solid fa-spinner fa-spin"></i>
+          </div>
+          <h4 class="font-bold text-indigo-700 text-base">Memproses Pemindaian</h4>
+          <p class="text-xs text-slate-400 mt-1">${safe(detail || 'Memvalidasi QR Code...')}</p>`;
+        return;
+      }
+
+      if (type === 'success') {
+        resEl.innerHTML = `
+          <div class="w-16 h-16 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center text-2xl mb-3">
+            <i class="fa-solid fa-circle-check"></i>
+          </div>
+          <h4 class="font-bold text-emerald-700 text-base">${safe(nama)} (${safe(status)})</h4>
+          <p class="text-xs text-emerald-600 mt-1">Berhasil dicatat • ${safe(detail)}</p>`;
+        setTimeout(() => {
+          if (currentActiveView === 'scan') setGeneralScanResult('waiting');
+        }, 3500);
+        return;
+      }
+
+      if (type === 'duplicate') {
+        resEl.innerHTML = `
+          <div class="w-16 h-16 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center text-2xl mb-3">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+          </div>
+          <h4 class="font-bold text-rose-700 text-base">${safe(nama)} Sudah Absen</h4>
+          <p class="text-xs text-rose-600 mt-1">${safe(detail)}</p>`;
+        setTimeout(() => {
+          if (currentActiveView === 'scan') setGeneralScanResult('waiting');
+        }, 3500);
+        return;
+      }
+
+      if (type === 'error') {
+        resEl.innerHTML = `
+          <div class="w-16 h-16 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center text-2xl mb-3">
+            <i class="fa-solid fa-circle-exclamation"></i>
+          </div>
+          <h4 class="font-bold text-rose-700 text-base">Pemindaian Tidak Valid</h4>
+          <p class="text-xs text-rose-600 mt-1">${safe(detail)}</p>`;
+        setTimeout(() => {
+          if (currentActiveView === 'scan') setGeneralScanResult('waiting');
+        }, 3500);
+      }
+    }
+
     async function recordAttendanceDirect(nisn, nama, kelas, status, jenis, peran = 'Siswa') {
       if (isScanProcessing) return;
       isScanProcessing = true;
@@ -1386,6 +1493,8 @@
 
         const cleanNisn = String(nisn || '').trim();
         const normNisn = cleanNisn.replace(/^0+/, '');
+
+        setGeneralScanResult('processing', nama, status, `ID ${cleanNisn} sedang divalidasi...`);
 
         const isDuplicate = attendanceLogs.some(log => {
           const logNisn = String(log.nisn || '').trim().replace(/^0+/, '');
@@ -1401,6 +1510,7 @@
           if (resEl) {
             resEl.innerHTML = `<div class="text-rose-600 font-bold text-sm"><i class="fa-solid fa-triangle-exclamation text-xl mb-1"></i><br>${nama} Sudah Absen (${jenis})!</div>`;
           }
+          setGeneralScanResult('duplicate', nama, status, `Jenis sesi: ${jenis}`);
         } else {
           const materiVal = document.getElementById('agenda-materi')?.value.trim() || '-';
 
@@ -1420,11 +1530,12 @@
           };
 
           attendanceLogs.unshift(logEntry);
-          
+
           const resEl = document.getElementById('agenda-scan-result');
           if (resEl) {
             resEl.innerHTML = `<div class="text-emerald-600 font-bold text-sm"><i class="fa-solid fa-circle-check text-xl mb-1"></i><br>${nama} (${status}) Berhasil Dicatat!</div>`;
           }
+          setGeneralScanResult('success', nama, status, jenis);
           showToast(`✅ Absen ${nama} tercatat`);
 
           callGasBackend('saveAbsensi', logEntry);
@@ -1432,6 +1543,7 @@
         }
       } catch (err) {
         console.error("Error catat absensi:", err);
+        setGeneralScanResult('error', nama, status, 'Terjadi kesalahan saat mencatat absensi.');
       } finally {
         setTimeout(() => { isScanProcessing = false; }, 1200);
       }
@@ -1446,41 +1558,94 @@
         const placeholder = document.getElementById('qr-placeholder');
         if (placeholder) placeholder.style.display = 'none';
 
+        setGeneralScanResult('waiting');
+
         if (html5QrScanner && isCameraActive) {
           try { await html5QrScanner.stop(); } catch(e){}
         }
         html5QrScanner = new Html5Qrcode("qr-reader");
-        
-        let devices = [];
+
         try {
-          devices = await Html5Qrcode.getCameras();
-          if (devices && devices.length > 0) {
-            populateCameraSelectOptions('camera-select', devices);
-            if (!selectedCameraId) selectedCameraId = devices[0].id;
+          generalCameraDevices = await Html5Qrcode.getCameras() || [];
+          if (generalCameraDevices.length > 0) {
+            populateCameraSelectOptions('camera-select', generalCameraDevices);
+
+            if (selectedCameraId && generalCameraDevices.some(d => String(d.id) === String(selectedCameraId))) {
+              const selectElem = document.getElementById('camera-select');
+              if (selectElem) selectElem.value = selectedCameraId;
+            } else {
+              const preferredDevice = findGeneralCameraByFacing(generalCameraFacing);
+              selectedCameraId = preferredDevice ? preferredDevice.id : null;
+
+              const selectElem = document.getElementById('camera-select');
+              if (selectElem && selectedCameraId) selectElem.value = selectedCameraId;
+            }
           }
         } catch (err) {
           console.warn("General camera list fetch warning:", err);
+          generalCameraDevices = [];
+          selectedCameraId = null;
         }
 
-        const config = { fps: 10, qrbox: { width: 220, height: 220 } };
+        const config = {
+          fps: 10,
+          qrbox: { width: 220, height: 220 },
+          aspectRatio: 1.0
+        };
 
         try {
           if (selectedCameraId) {
-            await html5QrScanner.start(selectedCameraId, config, (txt) => processAttendanceScan(txt), () => {});
+            await html5QrScanner.start(
+              selectedCameraId,
+              config,
+              (txt) => processAttendanceScan(txt),
+              () => {}
+            );
           } else {
-            await html5QrScanner.start({ facingMode: "environment" }, config, (txt) => processAttendanceScan(txt), () => {});
+            await html5QrScanner.start(
+              { facingMode: generalCameraFacing },
+              config,
+              (txt) => processAttendanceScan(txt),
+              () => {}
+            );
           }
         } catch (err1) {
-          await html5QrScanner.start({ facingMode: "user" }, config, (txt) => processAttendanceScan(txt), () => {});
+          console.warn("Kamera utama gagal, mencoba mode alternatif:", err1);
+
+          try {
+            selectedCameraId = null;
+            await html5QrScanner.start(
+              { facingMode: generalCameraFacing },
+              config,
+              (txt) => processAttendanceScan(txt),
+              () => {}
+            );
+          } catch (err2) {
+            const fallbackFacing = generalCameraFacing === 'environment' ? 'user' : 'environment';
+            generalCameraFacing = fallbackFacing;
+            await html5QrScanner.start(
+              { facingMode: fallbackFacing },
+              config,
+              (txt) => processAttendanceScan(txt),
+              () => {}
+            );
+          }
         }
-        
-        isCameraActive = true; 
+
+        isCameraActive = true;
         document.getElementById('camera-btn-text').innerText = "Matikan Kamera";
+
+        const facingText = document.getElementById('camera-facing-btn-text');
+        if (facingText) {
+          facingText.innerText = generalCameraFacing === 'user' ? 'Kamera Belakang' : 'Kamera Depan';
+        }
       } catch (e) { 
-        console.error(e);
-        alert("Gagal membuka kamera. Pastikan izin kamera telah diberikan di browser."); 
+        console.error("Gagal membuka kamera:", e);
+        isCameraActive = false;
         const placeholder = document.getElementById('qr-placeholder');
         if (placeholder) placeholder.style.display = 'block';
+        setGeneralScanResult('error', '', '', 'Gagal membuka kamera. Pastikan izin kamera telah diberikan di browser.');
+        alert("Gagal membuka kamera. Pastikan izin kamera telah diberikan di browser.");
       }
     }
 
@@ -1491,17 +1656,20 @@
         document.getElementById('camera-btn-text').innerText = "Nyalakan Kamera";
         const placeholder = document.getElementById('qr-placeholder');
         if (placeholder) placeholder.style.display = 'block';
+        setGeneralScanResult('waiting');
       }
     }
 
     function processAttendanceScan(idCode) {
       const cleanId = String(idCode).trim();
+      setGeneralScanResult('processing', '', '', `QR Code terbaca: ${cleanId}`);
+
       const student = students.find(s => String(s.nisn).trim() === cleanId);
       if (student) {
         recordAttendanceDirect(student.nisn, student.nama, student.kelas, currentScanMode, currentJenisAbsen, 'Siswa');
         return;
       }
-      
+
       const teacher = teachers.find(t => String(t.nip).trim() === cleanId);
       if (teacher) {
         recordAttendanceDirect(teacher.nip, teacher.nama, 'Guru/Staf', currentScanMode, currentJenisAbsen, 'Guru');
@@ -1509,6 +1677,7 @@
       }
 
       showToast("ID / QR Code tidak terdaftar dalam sistem", "error");
+      setGeneralScanResult('error', '', '', 'ID / QR Code tidak terdaftar dalam sistem.');
     }
 
     function handleManualInput(e) {
