@@ -2330,6 +2330,60 @@
       };
       reader.readAsArrayBuffer(file);
     }
+    // Simpan nama tab yang sedang aktif ke localStorage
+function setActiveTab(viewId) {
+  localStorage.setItem('active_app_tab', viewId);
+  // Panggil fungsi UI bawaan Anda untuk menampilkan halaman/tab tersebut
+  if (typeof showView === 'function') {
+    showView(viewId);
+  }
+}
+
+// RESTORE TAB: Panggil fungsi ini tepat SETELAH proses Login Berhasil 
+// atau saat aplikasi pertama kali dimuat (DOMContentLoaded)
+function restoreLastActiveTab() {
+  const savedTab = localStorage.getItem('active_app_tab');
+  const userRole = localStorage.getItem('user_role'); // Contoh: 'admin' atau 'guru'
+
+  if (savedTab) {
+    // Tampilkan kembali tab terakhir yang disimpan
+    if (typeof showView === 'function') {
+      showView(savedTab);
+    }
+  } else {
+    // Default tab jika baru pertama kali login
+    if (userRole === 'admin') {
+      setActiveTab('admin-dashboard');
+    } else if (userRole === 'guru') {
+      setActiveTab('guru-dashboard');
+    }
+  }
+}
+    function onLoginSuccess(userData) {
+  // 1. Simpan status user
+  localStorage.setItem('user_role', userData.role); // 'admin' atau 'guru'
+  
+  // 2. Set tab awal berdasarkan role
+  const defaultTab = userData.role === 'admin' ? 'admin-dashboard' : 'guru-dashboard';
+  setActiveTab(defaultTab);
+}
+    document.addEventListener('DOMContentLoaded', () => {
+  // Cek apakah pengguna sudah login
+  const savedRole = localStorage.getItem('user_role');
+  
+  if (savedRole) {
+    restoreLastActiveTab();
+  }
+});
+    function handleLogout() {
+  localStorage.removeItem('active_app_tab');
+  localStorage.removeItem('user_role');
+  
+  // Redirect ke halaman login
+  if (typeof showView === 'function') {
+    showView('login-page');
+  }
+}
   </script>
 </body>
 </html>
