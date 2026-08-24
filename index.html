@@ -1252,13 +1252,20 @@
 
     /* ============ KAMERA SCANNER FIX (PERBAIKAN) ============ */
 // Deklarasi variabel global scanner
-let html5QrScanner = null;
-let html5QrAgenda = null;
-let isCameraActive = false;
-let isAgendaCamActive = false;
-let selectedCameraId = null;
-let selectedAgendaCameraId = null;
-let isScanProcessing = false;
+window.currentLoggedTeacher = window.currentLoggedTeacher || null;
+window.currentLoggedUser = window.currentLoggedUser || null;
+window.students = window.students || [];
+window.teachers = window.teachers || [];
+window.attendanceLogs = window.attendanceLogs || [];
+window.currentScanMode = window.currentScanMode || 'Hadir';
+window.currentJenisAbsen = window.currentJenisAbsen || 'Masuk';
+
+// Fungsi fallback untuk toast notification agar tidak crash jika belum ada
+if (typeof window.showToast !== 'function') {
+  window.showToast = function(msg, type) {
+    console.log(`[Toast ${type}]: ${msg}`);
+  };
+}
 
 function populateCameraSelectOptions(selectElemId, devices) {
   const selectElem = document.getElementById(selectElemId);
