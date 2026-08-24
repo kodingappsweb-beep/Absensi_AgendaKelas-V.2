@@ -1250,8 +1250,17 @@
       const cd = document.getElementById('current-date-display'); if (cd) cd.innerText = now.toLocaleDateString('id-ID', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
     }
 
-    /* ============ KAMERA SCANNER FIX (PERBAIKAN) ============ */
-// Deklarasi variabel global scanner
+    /* ============ KAMERA SCANNER FIX (SAFE SCOPE & ANTI-MENTAL) ============ */
+// Inisialisasi variabel global kamera & data tanpa 'let'/'const' agar tidak bentrok
+window.html5QrScanner = window.html5QrScanner || null;
+window.html5QrAgenda = window.html5QrAgenda || null;
+window.isCameraActive = typeof window.isCameraActive !== 'undefined' ? window.isCameraActive : false;
+window.isAgendaCamActive = typeof window.isAgendaCamActive !== 'undefined' ? window.isAgendaCamActive : false;
+window.selectedCameraId = window.selectedCameraId || null;
+window.selectedAgendaCameraId = window.selectedAgendaCameraId || null;
+window.isScanProcessing = false;
+
+// Safe State Data
 window.currentLoggedTeacher = window.currentLoggedTeacher || null;
 window.currentLoggedUser = window.currentLoggedUser || null;
 window.students = window.students || [];
@@ -1260,7 +1269,7 @@ window.attendanceLogs = window.attendanceLogs || [];
 window.currentScanMode = window.currentScanMode || 'Hadir';
 window.currentJenisAbsen = window.currentJenisAbsen || 'Masuk';
 
-// Fungsi fallback untuk toast notification agar tidak crash jika belum ada
+// Fallback Toast
 if (typeof window.showToast !== 'function') {
   window.showToast = function(msg, type) {
     console.log(`[Toast ${type}]: ${msg}`);
@@ -1282,8 +1291,8 @@ function populateCameraSelectOptions(selectElemId, devices) {
 async function switchCameraDeviceAgenda() {
   const selectElem = document.getElementById('agenda-camera-select');
   if (selectElem) {
-    selectedAgendaCameraId = selectElem.value;
-    if (isAgendaCamActive) {
+    window.selectedAgendaCameraId = selectElem.value;
+    if (window.isAgendaCamActive) {
       await stopCameraAgenda();
       await startCameraAgenda();
     }
@@ -1293,8 +1302,8 @@ async function switchCameraDeviceAgenda() {
 async function switchCameraDevice() {
   const selectElem = document.getElementById('camera-select');
   if (selectElem) {
-    selectedCameraId = selectElem.value;
-    if (isCameraActive) {
+    window.selectedCameraId = selectElem.value;
+    if (window.isCameraActive) {
       await stopCamera();
       await startCamera();
     }
@@ -1302,7 +1311,7 @@ async function switchCameraDevice() {
 }
 
 async function toggleCameraAgenda() {
-  if (isAgendaCamActive) { 
+  if (window.isAgendaCamActive) { 
     await stopCameraAgenda(); 
   } else { 
     await startCameraAgenda(); 
@@ -1314,20 +1323,20 @@ async function startCameraAgenda() {
     const placeholder = document.getElementById('qr-placeholder-agenda');
     if (placeholder) placeholder.style.display = 'none';
 
-    if (html5QrAgenda && isAgendaCamActive) {
+    if (window.html5QrAgenda && window.isAgendaCamActive) {
       try { 
-        await html5QrAgenda.stop(); 
-        await html5QrAgenda.clear();
+        await window.html5QrAgenda.stop(); 
+        await window.html5QrAgenda.clear();
       } catch(e){}
     }
-    html5QrAgenda = new Html5Qrcode("qr-reader-agenda");
+    window.html5QrAgenda = new Html5Qrcode("qr-reader-agenda");
     
     let devices = [];
     try {
       devices = await Html5Qrcode.getCameras();
       if (devices && devices.length > 0) {
         populateCameraSelectOptions('agenda-camera-select', devices);
-        if (!selectedAgendaCameraId) selectedAgendaCameraId = devices[0].id;
+        if (!window.selectedAgendaCameraId) window.selectedAgendaCameraId = devices[0].id;
       }
     } catch (err) {
       console.warn("Camera list fetch warning:", err);
@@ -1336,16 +1345,16 @@ async function startCameraAgenda() {
     const config = { fps: 10, qrbox: { width: 200, height: 200 } };
 
     try {
-      if (selectedAgendaCameraId) {
-        await html5QrAgenda.start(selectedAgendaCameraId, config, (txt) => processAgendaScan(txt), () => {});
+      if (window.selectedAgendaCameraId) {
+        await window.html5QrAgenda.start(window.selectedAgendaCameraId, config, (txt) => processAgendaScan(txt), () => {});
       } else {
-        await html5QrAgenda.start({ facingMode: "environment" }, config, (txt) => processAgendaScan(txt), () => {});
+        await window.html5QrAgenda.start({ facingMode: "environment" }, config, (txt) => processAgendaScan(txt), () => {});
       }
     } catch (err1) {
-      await html5QrAgenda.start({ facingMode: "user" }, config, (txt) => processAgendaScan(txt), () => {});
+      await window.html5QrAgenda.start({ facingMode: "user" }, config, (txt) => processAgendaScan(txt), () => {});
     }
 
-    isAgendaCamActive = true;
+    window.isAgendaCamActive = true;
     const btnText = document.getElementById('agenda-camera-btn-text');
     if (btnText) btnText.innerText = "Matikan Kamera";
   } catch (e) { 
@@ -1357,12 +1366,12 @@ async function startCameraAgenda() {
 }
 
 async function stopCameraAgenda() {
-  if (html5QrAgenda && isAgendaCamActive) {
+  if (window.html5QrAgenda && window.isAgendaCamActive) {
     try { 
-      await html5QrAgenda.stop(); 
-      await html5QrAgenda.clear();
+      await window.html5QrAgenda.stop(); 
+      await window.html5QrAgenda.clear();
     } catch(e){}
-    isAgendaCamActive = false;
+    window.isAgendaCamActive = false;
     const btnText = document.getElementById('agenda-camera-btn-text');
     if (btnText) btnText.innerText = "Nyalakan Kamera";
     const placeholder = document.getElementById('qr-placeholder-agenda');
@@ -1371,17 +1380,18 @@ async function stopCameraAgenda() {
 }
 
 function getActiveTeacherClass() {
-  if (typeof currentLoggedTeacher === 'undefined' || !currentLoggedTeacher) return 'Semua';
-  if (currentLoggedTeacher.kelas === 'Semua') {
+  if (!window.currentLoggedTeacher) return 'Semua';
+  if (window.currentLoggedTeacher.kelas === 'Semua') {
     const selectKelas = document.getElementById('agenda-selected-class');
     return selectKelas ? selectKelas.value : 'Semua';
   }
-  return currentLoggedTeacher.kelas;
+  return window.currentLoggedTeacher.kelas;
 }
 
 function processAgendaScan(nisnRaw) {
   const nisn = String(nisnRaw).trim();
-  const student = students.find(s => String(s.nisn).trim() === nisn);
+  const studentList = window.students || [];
+  const student = studentList.find(s => String(s.nisn).trim() === nisn);
   if (!student) { showToast("Siswa tidak ditemukan", "error"); return; }
   
   const targetKelas = getActiveTeacherClass();
@@ -1391,7 +1401,7 @@ function processAgendaScan(nisnRaw) {
   }
   
   const mapelElem = document.getElementById('agenda-mapel');
-  const mapelName = (mapelElem && mapelElem.value) || currentLoggedTeacher?.jabatan || 'Pelajaran';
+  const mapelName = (mapelElem && mapelElem.value) || window.currentLoggedTeacher?.jabatan || 'Pelajaran';
   recordAttendanceDirect(nisn, student.nama, student.kelas, 'Hadir', mapelName, 'Siswa');
 }
 
@@ -1407,8 +1417,8 @@ function handleAgendaManualScan() {
 }
 
 async function recordAttendanceDirect(nisn, nama, kelas, status, jenis, peran = 'Siswa') {
-  if (isScanProcessing) return;
-  isScanProcessing = true;
+  if (window.isScanProcessing) return;
+  window.isScanProcessing = true;
 
   try {
     const now = new Date();
@@ -1418,8 +1428,9 @@ async function recordAttendanceDirect(nisn, nama, kelas, status, jenis, peran = 
 
     const cleanNisn = String(nisn || '').trim();
     const normNisn = cleanNisn.replace(/^0+/, '');
+    const logs = window.attendanceLogs || [];
 
-    const isDuplicate = attendanceLogs.some(log => {
+    const isDuplicate = logs.some(log => {
       const logNisn = String(log.nisn || '').trim().replace(/^0+/, '');
       const logDate = String(log.date || log.timestamp || '').split(' ')[0];
       const logJenis = String(log.jenisAbsen || log.jenis || '').trim();
@@ -1448,10 +1459,11 @@ async function recordAttendanceDirect(nisn, nama, kelas, status, jenis, peran = 
         peran: peran, 
         method: 'Scan System',
         materi: materiVal,
-        guruNip: typeof currentLoggedTeacher !== 'undefined' && currentLoggedTeacher ? currentLoggedTeacher.nip : ''
+        guruNip: window.currentLoggedTeacher ? window.currentLoggedTeacher.nip : ''
       };
 
-      attendanceLogs.unshift(logEntry);
+      if (!window.attendanceLogs) window.attendanceLogs = [];
+      window.attendanceLogs.unshift(logEntry);
       
       const resEl = document.getElementById('agenda-scan-result');
       if (resEl) {
@@ -1469,12 +1481,12 @@ async function recordAttendanceDirect(nisn, nama, kelas, status, jenis, peran = 
   } catch (err) {
     console.error("Error catat absensi:", err);
   } finally {
-    setTimeout(() => { isScanProcessing = false; }, 1200);
+    setTimeout(() => { window.isScanProcessing = false; }, 1200);
   }
 }
 
 async function toggleCamera() { 
-  if (isCameraActive) await stopCamera(); else await startCamera(); 
+  if (window.isCameraActive) await stopCamera(); else await startCamera(); 
 }
 
 async function startCamera() {
@@ -1482,20 +1494,20 @@ async function startCamera() {
     const placeholder = document.getElementById('qr-placeholder');
     if (placeholder) placeholder.style.display = 'none';
 
-    if (html5QrScanner && isCameraActive) {
+    if (window.html5QrScanner && window.isCameraActive) {
       try { 
-        await html5QrScanner.stop(); 
-        await html5QrScanner.clear();
+        await window.html5QrScanner.stop(); 
+        await window.html5QrScanner.clear();
       } catch(e){}
     }
-    html5QrScanner = new Html5Qrcode("qr-reader");
+    window.html5QrScanner = new Html5Qrcode("qr-reader");
     
     let devices = [];
     try {
       devices = await Html5Qrcode.getCameras();
       if (devices && devices.length > 0) {
         populateCameraSelectOptions('camera-select', devices);
-        if (!selectedCameraId) selectedCameraId = devices[0].id;
+        if (!window.selectedCameraId) window.selectedCameraId = devices[0].id;
       }
     } catch (err) {
       console.warn("General camera list fetch warning:", err);
@@ -1504,16 +1516,16 @@ async function startCamera() {
     const config = { fps: 10, qrbox: { width: 220, height: 220 } };
 
     try {
-      if (selectedCameraId) {
-        await html5QrScanner.start(selectedCameraId, config, (txt) => processAttendanceScan(txt), () => {});
+      if (window.selectedCameraId) {
+        await window.html5QrScanner.start(window.selectedCameraId, config, (txt) => processAttendanceScan(txt), () => {});
       } else {
-        await html5QrScanner.start({ facingMode: "environment" }, config, (txt) => processAttendanceScan(txt), () => {});
+        await window.html5QrScanner.start({ facingMode: "environment" }, config, (txt) => processAttendanceScan(txt), () => {});
       }
     } catch (err1) {
-      await html5QrScanner.start({ facingMode: "user" }, config, (txt) => processAttendanceScan(txt), () => {});
+      await window.html5QrScanner.start({ facingMode: "user" }, config, (txt) => processAttendanceScan(txt), () => {});
     }
     
-    isCameraActive = true; 
+    window.isCameraActive = true; 
     const btnText = document.getElementById('camera-btn-text');
     if (btnText) btnText.innerText = "Matikan Kamera";
   } catch (e) { 
@@ -1525,12 +1537,12 @@ async function startCamera() {
 }
 
 async function stopCamera() {
-  if (html5QrScanner && isCameraActive) {
+  if (window.html5QrScanner && window.isCameraActive) {
     try { 
-      await html5QrScanner.stop(); 
-      await html5QrScanner.clear();
+      await window.html5QrScanner.stop(); 
+      await window.html5QrScanner.clear();
     } catch(e){}
-    isCameraActive = false;
+    window.isCameraActive = false;
     const btnText = document.getElementById('camera-btn-text');
     if (btnText) btnText.innerText = "Nyalakan Kamera";
     const placeholder = document.getElementById('qr-placeholder');
@@ -1540,21 +1552,23 @@ async function stopCamera() {
 
 function processAttendanceScan(idCode) {
   const cleanId = String(idCode).trim();
-  const student = students.find(s => String(s.nisn).trim() === cleanId);
+  const studentList = window.students || [];
+  const teacherList = window.teachers || [];
+
+  const student = studentList.find(s => String(s.nisn).trim() === cleanId);
   if (student) {
-    recordAttendanceDirect(student.nisn, student.nama, student.kelas, currentScanMode, currentJenisAbsen, 'Siswa');
+    recordAttendanceDirect(student.nisn, student.nama, student.kelas, window.currentScanMode, window.currentJenisAbsen, 'Siswa');
     return;
   }
   
-  const teacher = teachers.find(t => String(t.nip).trim() === cleanId);
+  const teacher = teacherList.find(t => String(t.nip).trim() === cleanId);
   if (teacher) {
-    recordAttendanceDirect(teacher.nip, teacher.nama, 'Guru/Staf', currentScanMode, currentJenisAbsen, 'Guru');
+    recordAttendanceDirect(teacher.nip, teacher.nama, 'Guru/Staf', window.currentScanMode, window.currentJenisAbsen, 'Guru');
     return;
   }
 
   showToast("ID / QR Code tidak terdaftar dalam sistem", "error");
 }
-
     function handleManualInput(e) {
       e.preventDefault();
       const val = document.getElementById('manual-nisn-input').value.trim();
