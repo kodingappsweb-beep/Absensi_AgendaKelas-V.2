@@ -2330,56 +2330,87 @@
       };
       reader.readAsArrayBuffer(file);
     }
-    // Simpan nama tab yang sedang aktif ke localStorage
+    /* ============ FITUR SIMPAN SESI & AUTO-RESTORE TAB ============ */
+
+// 1. Simpan Tab Aktif Setiap Kali Navigasi Berpindah
 function setActiveTab(viewId) {
+  if (!viewId) return;
   localStorage.setItem('active_app_tab', viewId);
-  // Panggil fungsi UI bawaan Anda untuk menampilkan halaman/tab tersebut
   if (typeof showView === 'function') {
     showView(viewId);
   }
 }
 
-// RESTORE TAB: Panggil fungsi ini tepat SETELAH proses Login Berhasil 
-// atau saat aplikasi pertama kali dimuat (DOMContentLoaded)
-function restoreLastActiveTab() {
-  const savedTab = localStorage.getItem('active_app_tab');
-  const userRole = localStorage.getItem('user_role'); // Contoh: 'admin' atau 'guru'
-
-  if (savedTab) {
-    // Tampilkan kembali tab terakhir yang disimpan
-    if (typeof showView === 'function') {
-      showView(savedTab);
-    }
-  } else {
-    // Default tab jika baru pertama kali login
-    if (userRole === 'admin') {
-      setActiveTab('admin-dashboard');
-    } else if (userRole === 'guru') {
-      setActiveTab('guru-dashboard');
-    }
-  }
-}
-    function onLoginSuccess(userData) {
-  // 1. Simpan status user
-  localStorage.setItem('user_role', userData.role); // 'admin' atau 'guru'
+// 2. Fungsi Login Berhasil (Panggil fungsi ini saat proses Login sukses)
+function onLoginSuccess(userData) {
+  if (!userData) return;
   
-  // 2. Set tab awal berdasarkan role
-  const defaultTab = userData.role === 'admin' ? 'admin-dashboard' : 'guru-dashboard';
+  // Simpan Role & Data User Lengkap ke LocalStorage
+  const role = userData.role || (userData.nip ? 'guru' : 'admin');
+  localStorage.setItem('user_role', role);
+  localStorage.setItem('logged_user_data', JSON.stringify(userData));
+
+  // Set memori JS
+  if (role === 'guru') {
+    window.currentLoggedTeacher = userData;
+  } else {
+    window.currentLoggedUser = userData;
+  }
+
+  // Arahkan ke Tab Awal
+  const defaultTab = role === 'admin' ? 'admin-dashboard' : 'guru-dashboard';
   setActiveTab(defaultTab);
 }
-    document.addEventListener('DOMContentLoaded', () => {
-  // Cek apakah pengguna sudah login
+
+// 3. Restore Sesi & Tab Saat Halaman Di-refresh
+function restoreLastActiveTab() {
   const savedRole = localStorage.getItem('user_role');
-  
-  if (savedRole) {
-    restoreLastActiveTab();
+  const savedUserData = localStorage.getItem('logged_user_data');
+  const savedTab = localStorage.getItem('active_app_tab');
+
+  // Jika ada data sesi login
+  if (savedRole && savedUserData) {
+    try {
+      const parsedUser = JSON.parse(savedUserData);
+
+      // Kembalikan data user ke memori JavaScript
+      if (savedRole === 'guru') {
+        window.currentLoggedTeacher = parsedUser;
+      } else {
+        window.currentLoggedUser = parsedUser;
+      }
+
+      // Tampilkan tab terakhir (atau fallback ke dashboard jika tab kosong)
+      const tabToOpen = savedTab || (savedRole === 'admin' ? 'admin-dashboard' : 'guru-dashboard');
+      if (typeof showView === 'function') {
+        showView(tabToOpen);
+      }
+    } catch (e) {
+      console.error("Gagal restore session data:", e);
+      handleLogout();
+    }
+  } else {
+    // Jika tidak ada sesi, kembalikan ke login
+    if (typeof showView === 'function') {
+      showView('login-page');
+    }
   }
+}
+
+// 4. Eksekusi Otomatis Saat Refresh Dimuat (DOM Ready)
+document.addEventListener('DOMContentLoaded', () => {
+  restoreLastActiveTab();
 });
-    function handleLogout() {
+
+// 5. Fungsi Logout (Menghapus Semua Sesi)
+function handleLogout() {
   localStorage.removeItem('active_app_tab');
   localStorage.removeItem('user_role');
-  
-  // Redirect ke halaman login
+  localStorage.removeItem('logged_user_data');
+
+  window.currentLoggedUser = null;
+  window.currentLoggedTeacher = null;
+
   if (typeof showView === 'function') {
     showView('login-page');
   }
