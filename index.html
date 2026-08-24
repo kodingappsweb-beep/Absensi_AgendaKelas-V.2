@@ -636,6 +636,7 @@
             <table class="w-full text-left text-sm">
               <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
                 <tr>
+                  <th class="px-4 py-3.5 text-center w-12">No</th>
                   <th class="px-6 py-3.5">Waktu / Tanggal</th>
                   <th class="px-6 py-3.5">NISN / ID</th>
                   <th class="px-6 py-3.5">Nama</th>
@@ -688,6 +689,7 @@
             <table class="w-full text-left text-sm">
               <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
                 <tr>
+                  <th class="px-4 py-3.5 text-center w-12">No</th>
                   <th class="px-6 py-3.5">NISN / ID</th>
                   <th class="px-6 py-3.5">Nama</th>
                   <th class="px-6 py-3.5">Peran</th>
@@ -1925,11 +1927,11 @@
       const filtered = getFilteredRekapData();
 
       if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" class="p-6 text-center text-slate-400 font-semibold">Tidak ada data rekap absensi untuk kriteria yang dipilih.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="p-6 text-center text-slate-400 font-semibold">Tidak ada data rekap absensi untuk kriteria yang dipilih.</td></tr>`;
         return;
       }
 
-      tbody.innerHTML = filtered.map(l => {
+      tbody.innerHTML = filtered.map((l, idx) => {
         const logNisnStr = String(l.nisn || '').trim();
         const logNisnNorm = logNisnStr.replace(/^0+/, '');
         let displayNisn = logNisnStr;
@@ -1944,6 +1946,7 @@
 
         return `
           <tr class="hover:bg-slate-50 border-b">
+            <td class="px-4 py-3.5 text-center font-bold text-slate-500">${idx + 1}</td>
             <td class="px-6 py-3.5 text-xs font-medium">${l.timestamp || l.time || '-'}</td>
             <td class="px-6 py-3.5 font-mono font-bold">${displayNisn}</td>
             <td class="px-6 py-3.5 font-bold text-slate-800">${l.nama}</td>
@@ -2059,12 +2062,13 @@
       });
 
       if (filteredBelum.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-slate-400 font-semibold">Semua siswa/guru sudah melakukan absensi atau tidak ada data.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-slate-400 font-semibold">Semua siswa/guru sudah melakukan absensi atau tidak ada data.</td></tr>`;
         return;
       }
 
-      tbody.innerHTML = filteredBelum.map(item => `
+      tbody.innerHTML = filteredBelum.map((item, idx) => `
         <tr class="hover:bg-slate-50 border-b">
+          <td class="px-4 py-3.5 text-center font-bold text-slate-500">${idx + 1}</td>
           <td class="px-6 py-3.5 font-mono font-bold">${item.nisn}</td>
           <td class="px-6 py-3.5 font-bold text-slate-800">${item.nama}</td>
           <td class="px-6 py-3.5"><span class="px-2 py-0.5 ${item.peran === 'Guru' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'} rounded text-xs font-semibold">${item.peran}</span></td>
@@ -2150,7 +2154,8 @@
       document.getElementById('form-nama').value = s.nama;
       document.getElementById('form-kelas').value = s.kelas;
       document.getElementById('form-jk').value = s.jk || 'L';
-      document.getElementById('form-nohp').value = s.nohp || '';
+      // Cek kedua kemungkinan nama field: nohp (p kecil) atau noHp (P besar)
+      document.getElementById('form-nohp').value = s.nohp || s.noHp || '';
       document.getElementById('modal-siswa').classList.remove('hidden');
     }
 
@@ -2162,7 +2167,22 @@
       const jk = document.getElementById('form-jk').value;
       const nohp = document.getElementById('form-nohp').value.trim();
 
-      const siswaData = { nisn, nama, kelas, jk, nohp, fotoUrl: '' };
+      // Ambil fotoUrl dari data lama jika sedang EDIT, agar foto tidak hilang
+      let existingFotoUrl = '';
+      if (editingSiswaNisn) {
+        const existing = students.find(s => String(s.nisn) === String(editingSiswaNisn));
+        if (existing) existingFotoUrl = existing.fotoUrl || existing.foto || '';
+      }
+
+      // Susun data siswa - pastikan urutan field sesuai kolom database
+      const siswaData = {
+        nisn: nisn,
+        nama: nama,
+        kelas: kelas,
+        jk: jk,
+        nohp: nohp,
+        fotoUrl: existingFotoUrl
+      };
 
       if (editingSiswaNisn) {
         const idx = students.findIndex(s => String(s.nisn) === String(editingSiswaNisn));
@@ -2171,7 +2191,9 @@
         students.push(siswaData);
       }
 
-      callGasBackend('saveSiswa', siswaData);
+      // Kirim SELURUH daftar siswa ke backend untuk sinkronisasi penuh
+      // Gunakan action 'simpanSiswa' dengan format { list: students }
+      callGasBackend('simpanSiswa', { list: students });
       closeSiswaModal();
       renderSiswaTable();
       showToast("Data siswa berhasil disimpan!");
@@ -2252,7 +2274,8 @@
       document.getElementById('form-guru-mapel').value = g.jabatan || '';
       document.getElementById('form-guru-jk').value = g.jk || 'L';
       document.getElementById('form-guru-kelas').value = g.kelas || 'Semua';
-      document.getElementById('form-guru-nohp').value = g.nohp || '';
+      // Cek kedua kemungkinan nama field: nohp (p kecil) atau noHp (P besar)
+      document.getElementById('form-guru-nohp').value = g.nohp || g.noHp || '';
       document.getElementById('modal-guru').classList.remove('hidden');
     }
 
@@ -2267,7 +2290,26 @@
       const kelas = document.getElementById('form-guru-kelas').value;
       const nohp = document.getElementById('form-guru-nohp').value.trim();
 
-      const guruData = { nip, nama, username, password, jabatan, jk, kelas, nohp, fotoUrl: '' };
+      // Ambil fotoUrl dari data lama jika sedang EDIT, agar foto tidak hilang
+      let existingFotoUrl = '';
+      if (editingGuruNip) {
+        const existing = teachers.find(g => String(g.nip) === String(editingGuruNip));
+        if (existing) existingFotoUrl = existing.fotoUrl || existing.foto || '';
+      }
+
+      // Susun data guru dengan URUTAN yang sesuai kolom database:
+      // Kolom A=NIP, B=Nama, C=Jabatan/Mapel, D=Kelas, E=JK, F=NoHP, G=Username, H=Password, I=FotoUrl
+      const guruData = {
+        nip: nip,
+        nama: nama,
+        jabatan: jabatan,
+        kelas: kelas,
+        jk: jk,
+        nohp: nohp,
+        username: username,
+        password: password,
+        fotoUrl: existingFotoUrl
+      };
 
       if (editingGuruNip) {
         const idx = teachers.findIndex(g => String(g.nip) === String(editingGuruNip));
@@ -2276,7 +2318,9 @@
         teachers.push(guruData);
       }
 
-      callGasBackend('saveGuru', guruData);
+      // Kirim SELURUH daftar guru ke backend untuk sinkronisasi penuh
+      // Gunakan action 'simpanGuru' dengan format { list: teachers }
+      callGasBackend('simpanGuru', { list: teachers });
       closeGuruModal();
       renderGuruTable();
       updateMapelDropdowns();
