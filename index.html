@@ -2165,21 +2165,32 @@
       `).join('');
     }
 
-    function shareRekapToWhatsApp() {
-      const dateVal = document.getElementById('rekap-date-filter')?.value || getTodayLocalDateStr();
-      const logs = attendanceLogs.filter(l => String(l.date || l.timestamp || '').startsWith(dateVal));
-      
-      let msg = `*REKAP ABSENSI ${schoolProfile.namaSekolah}*\nTanggal: ${dateVal}\nTotal Absen: ${logs.length}\n\n`;
-      logs.slice(0, 15).forEach((l, i) => {
-        msg += `${i+1}. ${l.nama} (${l.kelas}) - ${l.jenisAbsen}: *${l.status}*\n`;
-      });
+    function function shareRekapToWhatsApp() {
+      const dateFilter = document.getElementById('rekap-date-filter')?.value || getTodayLocalDateStr();
+      const classFilter = document.getElementById('rekap-class-filter')?.value || "ALL";
+      const mapelFilter = document.getElementById('rekap-mapel-filter')?.value || "ALL";
+      const filtered = getFilteredRekapData();
+      const jamInfo = document.getElementById('agenda-jampel')?.value || '-';
 
-      if (logs.length > 15) msg += `\n...dan ${logs.length - 15} data lainnya.`;
+      let textMsg = `*REKAP ABSENSI & AGENDA KELAS*\n`;
+      textMsg += `Sekolah: ${schoolProfile.namaSekolah}\n`;
+      textMsg += `Tanggal: ${dateFilter}\n`;
+      textMsg += `Jam Pelajaran: ${jamInfo}\n`;
+      textMsg += `Filter Mapel: ${mapelFilter}\n`;
+      textMsg += `Kelas: ${classFilter}\n`;
+      textMsg += `-----------------------------------\n\n`;
 
-      const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`;
-      window.open(url, '_blank');
+      if (filtered.length === 0) {
+        textMsg += `_Belum ada data absensi tercatat pada filter ini._`;
+      } else {
+        filtered.forEach((l, idx) => {
+          textMsg += `${idx + 1}. *${l.nama}* (${l.peran || 'Siswa'} - ${l.kelas}) - Status: *${l.status}* [${l.jenisAbsen || 'Umum'}]\n`;
+        });
+      }
+
+      const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(textMsg)}`;
+      window.open(waUrl, '_blank');
     }
-
     function exportRekapExcel() {
       if (attendanceLogs.length === 0) {
         showToast("Tidak ada data untuk diekspor", "error");
