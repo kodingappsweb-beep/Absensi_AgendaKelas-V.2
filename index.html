@@ -2166,31 +2166,35 @@
     }
 
     function shareRekapToWhatsApp() {
-      const dateFilter = document.getElementById('rekap-date-filter')?.value || getTodayLocalDateStr();
-      const classFilter = document.getElementById('rekap-class-filter')?.value || "ALL";
-      const mapelFilter = document.getElementById('rekap-mapel-filter')?.value || "ALL";
-      const filtered = getFilteredRekapData();
-      const jamInfo = document.getElementById('agenda-jampel')?.value || '-';
+  const dateFilter = document.getElementById('rekap-date-filter')?.value || getTodayLocalDateStr();
+  const classFilter = document.getElementById('rekap-class-filter')?.value || "ALL";
+  const mapelFilter = document.getElementById('rekap-mapel-filter')?.value || "ALL";
+  const filtered = getFilteredRekapData();
+  const jamInfo = document.getElementById('agenda-jampel')?.value || '-';
 
-      let textMsg = `*REKAP ABSENSI & AGENDA KELAS*\n`;
-      textMsg += `Sekolah: ${schoolProfile.namaSekolah}\n`;
-      textMsg += `Tanggal: ${dateFilter}\n`;
-      textMsg += `Jam Pelajaran: ${jamInfo}\n`;
-      textMsg += `Filter Mapel: ${mapelFilter}\n`;
-      textMsg += `Kelas: ${classFilter}\n`;
-      textMsg += `-----------------------------------\n\n`;
+  let textMsg = `*REKAP ABSENSI & AGENDA KELAS*\n`;
+  textMsg += `Sekolah: ${schoolProfile.namaSekolah}\n`;
+  textMsg += `Tanggal: ${dateFilter}\n`;
+  textMsg += `Jam Pelajaran: ${jamInfo}\n`;
+  textMsg += `Filter Mapel: ${mapelFilter}\n`;
+  textMsg += `Kelas: ${classFilter}\n`;
+  textMsg += `-----------------------------------\n\n`;
 
-      if (filtered.length === 0) {
-        textMsg += `_Belum ada data absensi tercatat pada filter ini._`;
-      } else {
-        filtered.forEach((l, idx) => {
-          textMsg += `${idx + 1}. *${l.nama}* (${l.peran || 'Siswa'} - ${l.kelas}) - Status: *${l.status}* [${l.jenisAbsen || 'Umum'}]\n`;
-        });
-      }
+  if (filtered.length === 0) {
+    textMsg += `_Belum ada data absensi tercatat pada filter ini._`;
+  } else {
+    filtered.forEach((l, idx) => {
+      const peran = l.peran || 'Siswa';
+      const kelas = l.kelas || classFilter;
+      const jenisAbsen = l.jenisAbsen || (mapelFilter !== 'ALL' ? mapelFilter : 'Umum');
+      
+      textMsg += `${idx + 1}. ${l.nama} (${peran} - ${kelas}) - Status: *${l.status}* [${jenisAbsen}]\n`;
+    });
+  }
 
-      const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(textMsg)}`;
-      window.open(waUrl, '_blank');
-    }
+  const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(textMsg)}`;
+  window.open(waUrl, '_blank');
+}
     function exportRekapExcel() {
       if (attendanceLogs.length === 0) {
         showToast("Tidak ada data untuk diekspor", "error");
